@@ -1,0 +1,48 @@
+services:
+  whisper:
+    image: hwdsl2/whisper-server:cuda
+    container_name: whisper
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:9000:9000"
+
+    environment:
+      WHISPER_MODEL: large-v3
+      WHISPER_LANGUAGE: pt
+      WHISPER_DEVICE: cuda
+      WHISPER_COMPUTE_TYPE: float16
+      WHISPER_BEAM: "5"
+      WHISPER_API_KEY: ""
+      WHISPER_LOG_LEVEL: INFO
+      WHISPER_MAX_UPLOAD_MB: "2048"
+      WHISPER_DISABLE_USAGE_COUNTS: "1"
+
+    volumes:
+      - whisper-data:/var/lib/whisper
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities:
+                - gpu
+
+  notes-organizer:
+    build: .
+    container_name: take-notes-organizer
+    depends_on:
+      - whisper
+    environment:
+      WHISPER_URL: http://whisper:9000
+      AUDIO_NOTES_FOLDER: /data/input
+      AUDIO_NOTES_OUTPUT_FOLDER: /data/output
+    volumes:
+      - ${AUDIO_NOTES_FOLDER:-./audio}:/data/input
+      - ${AUDIO_NOTES_OUTPUT_FOLDER:-./transcripts}:/data/output
+
+volumes:
+  whisper-data:
+    name: whisper-data

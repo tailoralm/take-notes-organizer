@@ -1,0 +1,27 @@
+{
+  "name": "take-notes-organizer",
+  "version": "1.0.0",
+  "description": "Copies Telegram voice notes from an input folder and transcribes them with a local Whisper server",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "ts-node src/index.ts",
+    "dev": "nodemon --watch src --exec ts-node src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "whisper",
+    "transcription",
+    "telegram",
+    "voice-notes"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "nodemon": "^3.1.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.4"
+  }
+}
