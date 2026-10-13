@@ -1,8 +1,7 @@
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
-import { convertToWav } from './audio';
 import { TranscriptsDb } from './db';
+import { transcribeFile } from './transcriber';
 
 const VOICE_NOTE_PATTERN = /^voice_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z\.ogg$/;
 const DB_FILE = 'transcripts.json';
@@ -17,6 +16,14 @@ export interface Config {
   silenceThresholdDb: number;
   /** Internal silences longer than this many seconds are trimmed. */
   silenceTrimSeconds: number;
+  /** BCP-47 language sent on every transcription request. */
+  language: string;
+  /** Target length of each chunk in seconds. */
+  chunkLengthSeconds: number;
+  /** Overlap between consecutive chunks in seconds. */
+  chunkOverlapSeconds: number;
+  /** Sampling temperature for the primary transcription attempts. */
+  temperature: number;
 }
 
 export interface Logger {
@@ -50,6 +57,10 @@ export function loadConfig(): Config {
     apiKey: process.env.WHISPER_API_KEY || undefined,
     silenceThresholdDb: numEnv('WHISPER_SILENCE_THRESHOLD_DB', -35),
     silenceTrimSeconds: numEnv('WHISPER_SILENCE_TRIM_SECONDS', 2),
+    language: process.env.WHISPER_LANGUAGE ?? 'pt',
+    chunkLengthSeconds: numEnv('WHISPER_CHUNK_SECONDS', 300),
+    chunkOverlapSeconds: numEnv('WHISPER_CHUNK_OVERLAP_SECONDS', 1),
+    temperature: numEnv('WHISPER_TEMPERATURE', 0),
   };
 }
 
@@ -135,30 +146,6 @@ async function waitForWhisper(config: Config, logger: Logger, timeoutMs = 10 * 6
   throw new Error(`Whisper server not ready at ${config.whisperUrl} after ${timeoutMs / 1000}s`);
 }
 
-async function transcribe(config: Config, audioPath: string): Promise<string> {
-  const form = new FormData();
-  form.append('model', 'whisper-1');
-  form.append('file', new Blob([fs.readFileSync(audioPath)]), path.basename(audioPath));
-
-  const headers: Record<string, string> = {};
-  if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
-
-  const res = await fetch(`${config.whisperUrl}/v1/audio/transcriptions`, {
-    method: 'POST',
-    headers,
-    body: form,
-  });
-
-  if (!res.ok) {
-    throw new Error(`Whisper transcription failed (${res.status}): ${await res.text()}`);
-  }
-
-  const data = (await res.json()) as { text?: string };
-  const text = data.text?.trim();
-  if (!text) throw new Error('Whisper returned an empty transcription');
-  return text;
-}
-
 export interface ProcessingResult {
   copied: number;
   transcribed: number;
@@ -202,18 +189,8 @@ export async function processAll(config: Config, logger: Logger): Promise<Proces
       logger.info(`Re-copied ${name}`);
     }
 
-    logger.info(`Preprocessing ${name}`);
-    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'notes-organizer-'));
-    let text: string;
-    try {
-      const wavPath = path.join(workDir, name.replace(/\.ogg$/, '.wav'));
-      await convertToWav(workingAudio, wavPath, config.silenceThresholdDb, config.silenceTrimSeconds);
-
-      logger.info(`Transcribing ${name}`);
-      text = await transcribe(config, wavPath);
-    } finally {
-      fs.rmSync(workDir, { recursive: true, force: true });
-    }
+    logger.info(`Transcribing ${name}`);
+    const { text } = await transcribeFile(config, logger, name.replace(/\.ogg$/, ''), workingAudio);
 
     const txtName = name.replace(/\.ogg$/, '.txt');
     fs.writeFileSync(path.join(config.outputFolder, txtName), text, 'utf8');
