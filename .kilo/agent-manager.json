@@ -1,14 +1,47 @@
 {
-  "worktrees": {},
-  "sessions": {},
+  "worktrees": {
+    "wt-1791901847165-1": {
+      "branch": "discreet-sidecar",
+      "path": "/media/second/workspace/projects/take-notes-organizer/.kilo/worktrees/discreet-sidecar",
+      "parentBranch": "main",
+      "createdAt": "2026-10-13T14:30:47.165Z",
+      "branchOwned": true,
+      "autoNameSessionId": "ses_eca53b144ffeGPinFMQhhT8L8x",
+      "autoNamePromptCount": 3
+    },
+    "wt-1791901870820-2": {
+      "branch": "receptive-basil",
+      "path": "/media/second/workspace/projects/take-notes-organizer/.kilo/worktrees/receptive-basil",
+      "parentBranch": "main",
+      "createdAt": "2026-10-13T14:31:10.820Z",
+      "branchOwned": true,
+      "autoNameSessionId": "ses_eca5354ecffez3de3Mekkb3T6u",
+      "autoNamePromptCount": 2
+    }
+  },
+  "sessions": {
+    "ses_eca53b144ffeGPinFMQhhT8L8x": {
+      "worktreeId": "wt-1791901847165-1",
+      "createdAt": "2026-10-13T14:30:47.231Z"
+    },
+    "ses_eca5354ecffez3de3Mekkb3T6u": {
+      "worktreeId": "wt-1791901870820-2",
+      "createdAt": "2026-10-13T14:31:10.870Z"
+    }
+  },
   "tabOrder": {
     "local": [
       "pending:d93ea1a7-2e62-431b-b627-4882408d31a1"
     ]
   },
+  "worktreeOrder": [
+    "wt-1791901847165-1",
+    "wt-1791901870820-2"
+  ],
   "sessionsCollapsed": true,
   "activeTarget": {
     "projectId": "prj-d6709a942dcf",
-    "kind": "local"
+    "kind": "session",
+    "sessionId": "ses_eca53b144ffeGPinFMQhhT8L8x"
   }
 }

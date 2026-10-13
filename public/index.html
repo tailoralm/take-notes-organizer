@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Take Notes Organizer</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="header">
+        <div class="brand">
+          <div class="brand-icon" aria-hidden="true">&#9835;</div>
+          <div>
+            <h1>Take Notes Organizer</h1>
+            <p class="subtitle">Telegram voice notes &rarr; Whisper transcripts</p>
+          </div>
+        </div>
+      </header>
+
+      <div class="banner" id="banner" hidden></div>
+
+      <section class="stats" aria-label="Statistics">
+        <article class="card">
+          <span class="card-label">Processed</span>
+          <span class="card-value" id="processed-count">&mdash;</span>
+        </article>
+        <article class="card">
+          <span class="card-label">To process</span>
+          <span class="card-value" id="pending-count">&mdash;</span>
+        </article>
+        <article class="card card-cta">
+          <button class="btn" id="process-btn" type="button">
+            <span class="btn-label">Process now</span>
+            <span class="spinner" hidden aria-hidden="true"></span>
+          </button>
+          <p class="hint" id="btn-hint">Transcribes all pending voice notes</p>
+        </article>
+      </section>
+
+      <section class="logs" id="logs">
+        <div class="logs-title">
+          <span>Processing log</span>
+          <button class="clear-btn" id="clear-btn" type="button">Clear</button>
+        </div>
+        <div class="log-panel" id="log-panel" aria-live="polite"></div>
+      </section>
+
+      <footer class="footer">
+        State is kept in <code>transcripts.json</code>, completed files in <code>processed/</code>
+      </footer>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

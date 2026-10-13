@@ -3,19 +3,23 @@
 ## Project overview
 
 `take-notes-organizer` copies Telegram voice notes from an input folder and transcribes
-them with a local self-hosted Whisper server. It is a one-shot worker: each run scans the
-input folder, copies new `.ogg` files to the output folder, transcribes them, moves the
-processed files into a `processed/` subfolder, and records state in a JSON database.
+them with a local self-hosted Whisper server. The core is a one-shot worker: each run scans
+the input folder, copies new `.ogg` files to the output folder, transcribes them, moves the
+processed files into a `processed/` subfolder, and records state in a JSON database. The same
+pipeline is exposed through a simple HTTP web UI (`node:http`, no frameworks) that shows the
+processed/pending counts, triggers runs, and streams live logs.
 
 ## Tech stack and commands
 
 - Node.js + TypeScript, CommonJS (`module: commonjs`), strict mode.
 - `npm` only. Dev tooling: `ts-node` (no build step required), `nodemon` for hot reload.
 - Dependencies: `dotenv` (loads `.env`), plus `typescript`, `ts-node`, `nodemon`, `@types/node` as dev deps.
-- `npm start` runs `ts-node src/index.ts` (production/one-shot run).
-- `npm run dev` runs nodemon watching `src`.
+- `npm start` runs `ts-node src/index.ts` (one-shot CLI run).
+- `npm run serve` runs `ts-node src/server.ts` (web UI server).
+- `npm run dev` runs nodemon watching `src` (CLI).
+- `npm run dev:server` runs nodemon watching `src` (web UI server).
 - `npm run typecheck` runs `tsc --noEmit` — ALWAYS run this after changes.
-- Do not add new dependencies unless strictly necessary; use built-in Node APIs (node:fs, node:path, global fetch/FormData/Blob).
+- Do not add new dependencies unless strictly necessary; use built-in Node APIs (node:fs, node:http, node:path, global fetch/FormData/Blob).
 
 ## Environment variables
 
@@ -25,13 +29,19 @@ Copied from `.env.example` into `.env` (`.env` is git-ignored).
 - `AUDIO_NOTES_OUTPUT_FOLDER` — working output folder. Required. Also the root for `transcripts.json` and `processed/`.
 - `WHISPER_URL` — base URL of the Whisper server (default `http://127.0.0.1:9000`).
 - `WHISPER_API_KEY` — optional Bearer token; leave empty when the server has auth disabled.
+- `PORT` — port for the web UI server (default `8080`).
 
 ## Architecture and data flow
 
-- `src/index.ts` — orchestration: config loading, scanning, copying, transcription, moving, mismatch validation.
+- `src/index.ts` — one-shot CLI entry: loads config, runs `processAll()`, exits.
+- `src/processor.ts` — shared pipeline and business logic. `Config`, `Logger`, `loadConfig()`,
+  `getStatus()`, and `processAll(config, logger)`; the CLI and the web server use the same code.
+- `src/server.ts` — zero-dependency `node:http` server that serves the web UI and runs the
+  pipeline behind an API with a log stream.
 - `src/db.ts` — `TranscriptsDb`, the file-backed repository for `transcripts.json`.
+- `public/` — the web UI: `index.html`, `style.css`, `app.js` (plain HTML/CSS/JS, no build step).
 
-Processing pipeline (`src/index.ts` `main()`):
+Processing pipeline (`src/processor.ts` `processAll()`):
 1. Create output folder and `processed/` subfolder; load the `transcripts.json` database.
 2. `validateMismatches()` — warn about JSON entries whose physical files are missing (see rules below).
 3. Scan the input folder for voice notes matching the pattern `voice_<ISO-8601 timestamp>.ogg`
@@ -39,6 +49,15 @@ Processing pipeline (`src/index.ts` `main()`):
 4. For each pending file: copy it from input to the output root (if not already copied),
    transcribe it via Whisper, write the `.txt`, then **move** both the `.ogg` and `.txt`
    into `processed/`, and mark the entry transcribed in the JSON (saving after each file).
+
+## Web UI API
+
+- `GET /api/status` — JSON `{ "processed": number, "pending": number }`.
+- `POST /api/process` — runs `processAll()`; streams **NDJSON** log lines
+  (`{"type":"log","level":"info|success|warn|error","message":"..."}`) followed by a terminal
+  `{"type":"done","copied":n,"transcribed":n}` or `{"type":"error","message":"..."}`. One run at
+  a time; a second concurrent call returns `409`.
+- `GET /` serves `public/index.html`; `/style.css` and `/app.js` are served as static files.
 
 ## Core rules — do not break these
 
@@ -75,8 +94,10 @@ Processing pipeline (`src/index.ts` `main()`):
     `WHISPER_URL: http://whisper:9000` (service network name), and bind-mounts the host folders
     via compose interpolation: `${AUDIO_NOTES_FOLDER:-./audio}` → `/data/input` and
     `${AUDIO_NOTES_OUTPUT_FOLDER:-./transcripts}` → `/data/output`. Values come from the project `.env`.
-- The app container is a one-shot run (no `restart`); `docker compose up --build` runs it once per invocation.
-- The image installs all deps, compiles with `tsc` to `dist/`, and runs `node dist/index.js`.
+- The app container runs the **web UI server** (`node dist/server.js`, port `127.0.0.1:8080:8080`);
+  it is long-running (no `restart`, exits when stopped). A one-shot CLI run is still available with
+  `docker compose run --rm notes-organizer node dist/index.js`.
+- The image installs all deps, compiles with `tsc` to `dist/`, copies `public/`, and runs `node dist/server.js`.
 
 ## Development notes
 

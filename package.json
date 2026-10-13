@@ -5,7 +5,9 @@
   "main": "src/index.ts",
   "scripts": {
     "start": "ts-node src/index.ts",
+    "serve": "ts-node src/server.ts",
     "dev": "nodemon --watch src --exec ts-node src/index.ts",
+    "dev:server": "nodemon --watch src --exec ts-node src/server.ts",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
