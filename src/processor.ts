@@ -24,6 +24,16 @@ export interface Config {
   chunkOverlapSeconds: number;
   /** Sampling temperature for the primary transcription attempts. */
   temperature: number;
+  /** Chunk size in seconds used by the temperature retry. */
+  smallChunkSeconds: number;
+  /** Number of retries per chunk after a hallucination loop is flagged. */
+  maxRetries: number;
+  /** Sampling temperature used for the smaller-chunk retry. */
+  retryTemperature: number;
+  /** A chunk is flagged when the same segment text repeats this many times. */
+  repeatLimit: number;
+  /** A chunk is flagged when its gzip compression ratio exceeds this. */
+  compressionRatioThreshold: number;
 }
 
 export interface Logger {
@@ -61,6 +71,11 @@ export function loadConfig(): Config {
     chunkLengthSeconds: numEnv('WHISPER_CHUNK_SECONDS', 300),
     chunkOverlapSeconds: numEnv('WHISPER_CHUNK_OVERLAP_SECONDS', 1),
     temperature: numEnv('WHISPER_TEMPERATURE', 0),
+    smallChunkSeconds: numEnv('WHISPER_SMALL_CHUNK_SECONDS', 120),
+    maxRetries: numEnv('WHISPER_MAX_RETRIES', 2),
+    retryTemperature: numEnv('WHISPER_RETRY_TEMPERATURE', 0.2),
+    repeatLimit: numEnv('WHISPER_REPEAT_LIMIT', 3),
+    compressionRatioThreshold: numEnv('WHISPER_COMPRESSION_RATIO', 2.4),
   };
 }
 

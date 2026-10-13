@@ -1,3 +1,5 @@
+import { gzipSync } from 'node:zlib';
+
 export interface Segment {
   start: number;
   end: number;
@@ -49,6 +51,64 @@ export function mergeSegments(...groups: Segment[][]): Segment[] {
 
 export function segmentsToText(segments: Segment[]): string {
   return segments.map((s) => s.text.trim()).filter(Boolean).join(' ');
+}
+
+/** gzip-compressed size over raw byte length of the text (like Whisper's compression_ratio). */
+export function gzipRatio(text: string): number {
+  if (!text) return 0;
+  const compressed = gzipSync(text, { level: 9 }).length;
+  return compressed / Buffer.byteLength(text, 'utf8');
+}
+
+export interface RepetitionResult {
+  flagged: boolean;
+  maxRun: number;
+  ratio: number;
+}
+
+/**
+ * Flags a hallucination loop in a chunk's segments: either the same normalized
+ * segment text appears repeatLimit (default 3) or more times consecutively, or
+ * the gzip compression ratio of the joined text is above ratioThreshold (2.4).
+ */
+export function detectRepetition(
+  segments: Segment[],
+  repeatLimit = 3,
+  ratioThreshold = 2.4,
+): RepetitionResult {
+  const text = segmentsToText(segments);
+  let maxRun = 0;
+  let run = 0;
+  let previous: string | null = null;
+  for (const segment of segments) {
+    const norm = normalizeText(segment.text);
+    const voice = norm.length >= 2;
+    if (voice && norm === previous) {
+      run += 1;
+      if (run > maxRun) maxRun = run;
+    } else {
+      run = voice ? 1 : 0;
+    }
+    previous = voice ? norm : null;
+  }
+  // gzip overhead dominates tiny texts, so only trust the ratio on real-length chunks.
+  const ratio = gzipRatio(text);
+  const ratioFlagged = text.length >= 64 && ratio > ratioThreshold;
+  return { flagged: maxRun >= repeatLimit || ratioFlagged, maxRun, ratio };
+}
+
+/** Removes consecutive duplicate segments (by normalized text) from an ordered list. */
+export function collapseConsecutiveDuplicates(segments: Segment[]): Segment[] {
+  const collapsed: Segment[] = [];
+  let previous: string | null = null;
+  for (const segment of segments) {
+    const norm = normalizeText(segment.text);
+    const voice = norm.length >= 2;
+    if (voice && norm === previous) continue;
+    collapsed.push(segment);
+    previous = voice ? norm : null;
+  }
+  return collapsed;
 }
 
 export function formatTime(seconds: number): string {
