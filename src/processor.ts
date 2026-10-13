@@ -1,5 +1,7 @@
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
+import { convertToWav } from './audio';
 import { TranscriptsDb } from './db';
 
 const VOICE_NOTE_PATTERN = /^voice_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z\.ogg$/;
@@ -11,6 +13,10 @@ export interface Config {
   outputFolder: string;
   whisperUrl: string;
   apiKey?: string;
+  /** Sound level (dB) under which a region counts as silence, e.g. -35. */
+  silenceThresholdDb: number;
+  /** Internal silences longer than this many seconds are trimmed. */
+  silenceTrimSeconds: number;
 }
 
 export interface Logger {
@@ -42,7 +48,16 @@ export function loadConfig(): Config {
     outputFolder,
     whisperUrl: process.env.WHISPER_URL ?? 'http://127.0.0.1:9000',
     apiKey: process.env.WHISPER_API_KEY || undefined,
+    silenceThresholdDb: numEnv('WHISPER_SILENCE_THRESHOLD_DB', -35),
+    silenceTrimSeconds: numEnv('WHISPER_SILENCE_TRIM_SECONDS', 2),
   };
+}
+
+function numEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : fallback;
 }
 
 function findVoiceNotes(folder: string): string[] {
@@ -187,8 +202,18 @@ export async function processAll(config: Config, logger: Logger): Promise<Proces
       logger.info(`Re-copied ${name}`);
     }
 
-    logger.info(`Transcribing ${name}`);
-    const text = await transcribe(config, workingAudio);
+    logger.info(`Preprocessing ${name}`);
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'notes-organizer-'));
+    let text: string;
+    try {
+      const wavPath = path.join(workDir, name.replace(/\.ogg$/, '.wav'));
+      await convertToWav(workingAudio, wavPath, config.silenceThresholdDb, config.silenceTrimSeconds);
+
+      logger.info(`Transcribing ${name}`);
+      text = await transcribe(config, wavPath);
+    } finally {
+      fs.rmSync(workDir, { recursive: true, force: true });
+    }
 
     const txtName = name.replace(/\.ogg$/, '.txt');
     fs.writeFileSync(path.join(config.outputFolder, txtName), text, 'utf8');
