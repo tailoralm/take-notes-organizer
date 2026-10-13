@@ -8,8 +8,8 @@ services:
       - "127.0.0.1:9000:9000"
 
     environment:
-      WHISPER_MODEL: large-v3
-      WHISPER_LANGUAGE: pt
+      WHISPER_MODEL: ${WHISPER_MODEL:-large-v3}
+      WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-pt}
       WHISPER_DEVICE: cuda
       WHISPER_COMPUTE_TYPE: float16
       WHISPER_BEAM: "5"
@@ -20,6 +20,13 @@ services:
 
     volumes:
       - whisper-data:/var/lib/whisper
+
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/v1/models', timeout=5)"]
+      start_period: 600s
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
     deploy:
       resources:
@@ -34,7 +41,8 @@ services:
     build: .
     container_name: take-notes-organizer
     depends_on:
-      - whisper
+      whisper:
+        condition: service_healthy
     environment:
       WHISPER_URL: http://whisper:9000
       AUDIO_NOTES_FOLDER: /data/input
