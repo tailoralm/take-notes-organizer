@@ -3,11 +3,13 @@
 ## Project overview
 
 `take-notes-organizer` copies Telegram voice notes from an input folder and transcribes
-them with a local self-hosted Whisper server. The core is a one-shot worker: each run scans
-the input folder, copies new `.ogg` files to the output folder, transcribes them, moves the
-processed files into a `processed/` subfolder, and records state in a JSON database. The same
-pipeline is exposed through a simple HTTP web UI (`node:http`, no frameworks) that shows the
-processed/pending counts, triggers runs, and streams live logs.
+them with a local self-hosted Whisper server. Copying and transcribing are separate steps:
+a copy run scans the input (origin) folder and copies new `.ogg` files to the output folder;
+a process run transcribes the voice notes already sitting in the output folder, moves the
+processed files into a `processed/` subfolder, and records state in a JSON database. The
+one-shot CLI runs both steps in order. The same pipeline is exposed through a simple HTTP web
+UI (`node:http`, no frameworks) that shows processed/pending/to-copy counts, triggers either
+step, and streams live logs.
 
 ## Tech stack and commands
 
@@ -33,30 +35,45 @@ Copied from `.env.example` into `.env` (`.env` is git-ignored).
 
 ## Architecture and data flow
 
-- `src/index.ts` — one-shot CLI entry: loads config, runs `processAll()`, exits.
+- `src/index.ts` — one-shot CLI entry: loads config, runs `copyAll()` then `processAll()`, exits.
 - `src/processor.ts` — shared pipeline and business logic. `Config`, `Logger`, `loadConfig()`,
-  `getStatus()`, and `processAll(config, logger)`; the CLI and the web server use the same code.
-- `src/server.ts` — zero-dependency `node:http` server that serves the web UI and runs the
-  pipeline behind an API with a log stream.
+  `getStatus()`, `copyAll(config, logger)` and `processAll(config, logger)`; the CLI and the web
+  server use the same code.
+- `src/server.ts` — zero-dependency `node:http` server that serves the web UI and runs either
+  step behind an API with a log stream.
 - `src/db.ts` — `TranscriptsDb`, the file-backed repository for `transcripts.json`.
 - `public/` — the web UI: `index.html`, `style.css`, `app.js` (plain HTML/CSS/JS, no build step).
 
-Processing pipeline (`src/processor.ts` `processAll()`):
+Copy run (`src/processor.ts` `copyAll()`) — the only step that reads the origin folder:
 1. Create output folder and `processed/` subfolder; load the `transcripts.json` database.
 2. `validateMismatches()` — warn about JSON entries whose physical files are missing (see rules below).
-3. Scan the input folder for voice notes matching the pattern `voice_<ISO-8601 timestamp>.ogg`
-   (regex `^voice_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z\.ogg$`).
-4. For each pending file: copy it from input to the output root (if not already copied),
-   transcribe it via Whisper, write the `.txt`, then **move** both the `.ogg` and `.txt`
-   into `processed/`, and mark the entry transcribed in the JSON (saving after each file).
+3. Scan the **input (origin)** folder for voice notes matching the pattern
+   `voice_<ISO-8601 timestamp>.ogg` (regex `^voice_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z\.ogg$`)
+   that are not already copied or transcribed (not in the output root nor in `processed/`).
+4. Copy each one to the output root and mark the JSON entry copied (saving after each file).
+   Copying never transcribes.
+
+Process run (`src/processor.ts` `processAll()`) — transcribes what is already in the output folder:
+1. Create output folder and `processed/` subfolder; load the `transcripts.json` database.
+2. `validateMismatches()`.
+3. Scan the **output folder** for voice notes that are not transcribed yet (JSON `transcribed`
+   is not `true`). These are files copied by the copy run or moved in by hand for a re-run.
+4. For each: transcribe it via Whisper, write the `.txt`, then **move** both the `.ogg` and
+   `.txt` into `processed/`, and mark the entry transcribed in the JSON (saving after each file).
+   The process run never reads the input folder.
 
 ## Web UI API
 
-- `GET /api/status` — JSON `{ "processed": number, "pending": number }`.
-- `POST /api/process` — runs `processAll()`; streams **NDJSON** log lines
+- `GET /api/status` — JSON `{ "processed": number, "pending": number, "toCopy": number }`.
+  `pending` counts voice notes in the output folder not yet transcribed; `toCopy` counts voice
+  notes still only in the origin folder.
+- `POST /api/copy` — runs `copyAll()`; streams **NDJSON** log lines
   (`{"type":"log","level":"info|success|warn|error","message":"..."}`) followed by a terminal
-  `{"type":"done","copied":n,"transcribed":n}` or `{"type":"error","message":"..."}`. One run at
-  a time; a second concurrent call returns `409`.
+  `{"type":"done","copied":n}` or `{"type":"error","message":"..."}`.
+- `POST /api/process` — runs `processAll()`; same NDJSON stream, terminal
+  `{"type":"done","transcribed":n}` or `{"type":"error","message":"..."}`.
+- Copy and process share one run lock: only one may run at a time; a second concurrent call
+  returns `409`.
 - `GET /` serves `public/index.html`; `/style.css` and `/app.js` are served as static files.
 
 ## Core rules — do not break these
@@ -71,8 +88,11 @@ Processing pipeline (`src/processor.ts` `processAll()`):
   step that will flip it to `true`. Preserve the flag when updating entries; do not drop it.
 - **Mismatch warnings:** if the JSON says a file is transcribed but its `.ogg`/`.txt` are
   missing from `processed/`, log a warning. If the JSON says a file was copied but the copy
-  is missing from the output root, log a warning (and re-copy from the input folder if it is
-  still pending transcription).
+  is missing from the output root, log a warning; the next copy run re-copies it from the
+  origin folder when the source is still available.
+- **Copy and process are independent.** Only the copy run reads the origin folder and only the
+  copy run writes to the output root; the process run transcribes files already in the output
+  folder (including ones moved in by hand) and never copies.
 - Idempotency is mandatory: re-running with no new input must do nothing.
 
 ## Whisper server integration
@@ -94,10 +114,13 @@ Processing pipeline (`src/processor.ts` `processAll()`):
     `WHISPER_URL: http://whisper:9000` (service network name), and bind-mounts the host folders
     via compose interpolation: `${AUDIO_NOTES_FOLDER:-./audio}` → `/data/input` and
     `${AUDIO_NOTES_OUTPUT_FOLDER:-./transcripts}` → `/data/output`. Values come from the project `.env`.
-- The app container runs the **web UI server** (`node dist/server.js`, port `127.0.0.1:8080:8080`);
-  it is long-running (no `restart`, exits when stopped). A one-shot CLI run is still available with
-  `docker compose run --rm notes-organizer node dist/index.js`.
-- The image installs all deps, compiles with `tsc` to `dist/`, copies `public/`, and runs `node dist/server.js`.
+- The app container runs the **web UI server** on port `127.0.0.1:8080:8080`; it is long-running
+  (no `restart`, exits when stopped). It overrides the image CMD with `command: npm run dev:server`
+  (ts-node + nodemon) and bind-mounts `./src`, `./public` and `./tsconfig.json`, so edits apply
+  without rebuilding the image (nodemon hot-reloads on `src` changes; `public/` is re-read per
+  request). The image is still built once for the Node deps and `ffmpeg`.
+- A one-shot CLI run is available with `docker compose run --rm notes-organizer npm start`
+  (ts-node over the mounted `src`; do not use the stale `dist/`).
 
 ## Development notes
 

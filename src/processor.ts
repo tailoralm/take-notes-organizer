@@ -94,11 +94,25 @@ function findVoiceNotes(folder: string): string[] {
     .sort();
 }
 
+/**
+ * Voice notes already sitting in the output folder that still need transcription.
+ * These are files that were copied by the app or moved in by hand (e.g. to re-run
+ * a transcription), so the source folder is irrelevant here.
+ */
 function pendingVoiceNotes(config: Config, db: TranscriptsDb): string[] {
+  return findVoiceNotes(config.outputFolder).filter((name) => !db.get(name)?.transcribed);
+}
+
+/**
+ * Voice notes still only present in the origin folder that have not been copied to
+ * the output folder yet. Only the explicit "copy from origin" run uses this list.
+ */
+function copyPendingVoiceNotes(config: Config, db: TranscriptsDb): string[] {
   const processedDir = path.join(config.outputFolder, PROCESSED_DIR);
   return findVoiceNotes(config.inputFolder).filter((name) => {
     if (db.get(name)?.transcribed) return false;
     if (fs.existsSync(path.join(processedDir, name))) return false;
+    if (fs.existsSync(path.join(config.outputFolder, name))) return false;
     return true;
   });
 }
@@ -106,6 +120,7 @@ function pendingVoiceNotes(config: Config, db: TranscriptsDb): string[] {
 export interface Status {
   processed: number;
   pending: number;
+  toCopy: number;
 }
 
 export function getStatus(config: Config): Status {
@@ -114,6 +129,7 @@ export function getStatus(config: Config): Status {
   return {
     processed: db.all().filter((entry) => entry.transcribed).length,
     pending: pendingVoiceNotes(config, db).length,
+    toCopy: copyPendingVoiceNotes(config, db).length,
   };
 }
 
@@ -161,12 +177,15 @@ async function waitForWhisper(config: Config, logger: Logger, timeoutMs = 10 * 6
   throw new Error(`Whisper server not ready at ${config.whisperUrl} after ${timeoutMs / 1000}s`);
 }
 
-export interface ProcessingResult {
+export interface CopyResult {
   copied: number;
+}
+
+export interface ProcessingResult {
   transcribed: number;
 }
 
-export async function processAll(config: Config, logger: Logger): Promise<ProcessingResult> {
+function openDb(config: Config, logger: Logger): { db: TranscriptsDb; processedDir: string } {
   const processedDir = path.join(config.outputFolder, PROCESSED_DIR);
   fs.mkdirSync(config.outputFolder, { recursive: true });
   fs.mkdirSync(processedDir, { recursive: true });
@@ -174,35 +193,62 @@ export async function processAll(config: Config, logger: Logger): Promise<Proces
   const db = new TranscriptsDb(path.join(config.outputFolder, DB_FILE));
   db.load();
   validateMismatches(config, db, logger);
+  return { db, processedDir };
+}
+
+/**
+ * Copies voice notes that only exist in the origin folder into the output folder
+ * and records them as copied in the JSON. Copying never transcribes; the files
+ * land in the output folder where "process" picks them up.
+ */
+export async function copyAll(config: Config, logger: Logger): Promise<CopyResult> {
+  const { db } = openDb(config, logger);
+
+  const pending = copyPendingVoiceNotes(config, db);
+  if (pending.length === 0) {
+    logger.info('No voice notes to copy.');
+    return { copied: 0 };
+  }
+
+  let copied = 0;
+  for (const name of pending) {
+    const srcPath = path.join(config.inputFolder, name);
+    const destPath = path.join(config.outputFolder, name);
+    try {
+      fs.copyFileSync(srcPath, destPath);
+    } catch (error) {
+      logger.error(`Failed to copy ${name}: ${error instanceof Error ? error.message : String(error)}`);
+      continue;
+    }
+    db.markCopied(name);
+    db.save();
+    copied++;
+    logger.info(`Copied ${name}`);
+  }
+
+  logger.success(`Done. ${copied} file(s) copied.`);
+  return { copied };
+}
+
+/**
+ * Transcribes the voice notes already present in the output folder (copied by the
+ * copy run or moved in by hand). Each file is moved into processed/ with its txt
+ * once transcribed. This run never copies from the origin folder.
+ */
+export async function processAll(config: Config, logger: Logger): Promise<ProcessingResult> {
+  const { db, processedDir } = openDb(config, logger);
 
   const pending = pendingVoiceNotes(config, db);
-
   if (pending.length === 0) {
     logger.info('No voice notes to process.');
-    return { copied: 0, transcribed: 0 };
+    return { transcribed: 0 };
   }
 
   await waitForWhisper(config, logger);
 
-  let copied = 0;
   let transcribed = 0;
-
   for (const name of pending) {
     const workingAudio = path.join(config.outputFolder, name);
-    const srcPath = path.join(config.inputFolder, name);
-
-    if (!db.get(name)) {
-      fs.copyFileSync(srcPath, workingAudio);
-      db.markCopied(name);
-      db.save();
-      copied++;
-      logger.info(`Copied ${name}`);
-    } else if (!fs.existsSync(workingAudio)) {
-      logger.warn(`Mismatch: copied file for ${name} is missing, re-copying from the input folder.`);
-      fs.copyFileSync(srcPath, workingAudio);
-      copied++;
-      logger.info(`Re-copied ${name}`);
-    }
 
     logger.info(`Transcribing ${name}`);
     const { text } = await transcribeFile(config, logger, name.replace(/\.ogg$/, ''), workingAudio);
@@ -219,6 +265,6 @@ export async function processAll(config: Config, logger: Logger): Promise<Proces
     logger.success(`Transcribed ${name}`);
   }
 
-  logger.success(`Done. ${copied} file(s) copied, ${transcribed} file(s) transcribed.`);
-  return { copied, transcribed };
+  logger.success(`Done. ${transcribed} file(s) transcribed.`);
+  return { transcribed };
 }

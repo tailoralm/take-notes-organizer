@@ -2,15 +2,39 @@ const els = {
   banner: document.getElementById('banner'),
   processed: document.getElementById('processed-count'),
   pending: document.getElementById('pending-count'),
+  toCopy: document.getElementById('tocopy-count'),
+  copyBtn: document.getElementById('copy-btn'),
+  copyLabel: document.getElementById('copy-btn-label'),
+  copySpinner: document.getElementById('copy-spinner'),
+  copyHint: document.getElementById('copy-hint'),
   processBtn: document.getElementById('process-btn'),
-  btnLabel: document.querySelector('.btn-label'),
-  btnHint: document.getElementById('btn-hint'),
-  spinner: document.querySelector('.spinner'),
+  processLabel: document.getElementById('process-btn-label'),
+  processSpinner: document.getElementById('process-spinner'),
+  processHint: document.getElementById('process-hint'),
   clearBtn: document.getElementById('clear-btn'),
   logPanel: document.getElementById('log-panel'),
 };
 
-let processing = false;
+const OPERATIONS = {
+  copy: {
+    endpoint: '/api/copy',
+    starting: 'Requesting copy run...',
+    idleLabel: 'Copy from origin',
+    busyLabel: 'Copying',
+    idleHint: 'Copies new voice notes from the origin folder',
+    busyHint: 'Copying files, keep this tab open',
+  },
+  process: {
+    endpoint: '/api/process',
+    starting: 'Requesting processing run...',
+    idleLabel: 'Process now',
+    busyLabel: 'Processing',
+    idleHint: 'Transcribes files already in the output folder',
+    busyHint: 'Transcriptions can take a while, keep this tab open',
+  },
+};
+
+let running = null;
 
 function showBanner(message) {
   els.banner.textContent = message;
@@ -28,6 +52,7 @@ async function refreshStatus() {
     if (!res.ok) throw new Error(data.error || `Status request failed (${res.status})`);
     els.processed.textContent = String(data.processed);
     els.pending.textContent = String(data.pending);
+    els.toCopy.textContent = String(data.toCopy);
     hideBanner();
   } catch (error) {
     showBanner(`Cannot load status: ${error.message}`);
@@ -56,36 +81,49 @@ function handleEvent(event) {
   } else if (event.type === 'error') {
     appendLog('error', event.message);
   } else if (event.type === 'done') {
-    appendLog('success', `Finished. ${event.copied} copied, ${event.transcribed} transcribed.`);
+    const parts = [];
+    if (typeof event.copied === 'number') parts.push(`${event.copied} copied`);
+    if (typeof event.transcribed === 'number') parts.push(`${event.transcribed} transcribed`);
+    appendLog('success', `Finished. ${parts.join(', ') || 'nothing to do'}.`);
   }
 }
 
-function setProcessing(active) {
-  processing = active;
-  els.processBtn.disabled = active;
-  els.spinner.hidden = !active;
-  els.btnLabel.textContent = active ? 'Processing' : 'Process now';
-  els.btnHint.textContent = active
-    ? 'Transcriptions can take a while, keep this tab open'
-    : 'Transcribes all pending voice notes';
+function setBusy(kind) {
+  running = kind;
+  const busy = kind !== null;
+
+  els.copyBtn.disabled = busy;
+  els.processBtn.disabled = busy;
+
+  const copy = OPERATIONS.copy;
+  els.copySpinner.hidden = kind !== 'copy';
+  els.copyLabel.textContent = kind === 'copy' ? copy.busyLabel : copy.idleLabel;
+  els.copyHint.textContent = kind === 'copy' ? copy.busyHint : copy.idleHint;
+
+  const process = OPERATIONS.process;
+  els.processSpinner.hidden = kind !== 'process';
+  els.processLabel.textContent = kind === 'process' ? process.busyLabel : process.idleLabel;
+  els.processHint.textContent = kind === 'process' ? process.busyHint : process.idleHint;
 }
 
-async function startProcessing() {
-  if (processing) return;
-  setProcessing(true);
+async function runOperation(kind) {
+  if (running) return;
+  const operation = OPERATIONS[kind];
+
+  setBusy(kind);
   els.logPanel.textContent = '';
-  appendLog('info', 'Requesting processing run...');
+  appendLog('info', operation.starting);
 
   try {
-    const res = await fetch('/api/process', { method: 'POST' });
+    const res = await fetch(operation.endpoint, { method: 'POST' });
 
     if (res.status === 409) {
       const data = await res.json();
-      appendLog('error', data.error || 'Another processing run is already in progress.');
+      appendLog('error', data.error || 'Another run is already in progress.');
       return;
     }
     if (!res.ok) {
-      let message = `Failed to start processing (${res.status})`;
+      let message = `Failed to start run (${res.status})`;
       try {
         const data = await res.json();
         if (data && data.error) message = data.error;
@@ -127,12 +165,13 @@ async function startProcessing() {
   } catch (error) {
     appendLog('error', `Connection error: ${error.message}`);
   } finally {
-    setProcessing(false);
+    setBusy(null);
     refreshStatus();
   }
 }
 
-els.processBtn.addEventListener('click', startProcessing);
+els.copyBtn.addEventListener('click', () => runOperation('copy'));
+els.processBtn.addEventListener('click', () => runOperation('process'));
 els.clearBtn.addEventListener('click', () => {
   els.logPanel.textContent = '';
 });

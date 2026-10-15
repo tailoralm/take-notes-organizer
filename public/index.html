@@ -29,12 +29,26 @@
           <span class="card-label">To process</span>
           <span class="card-value" id="pending-count">&mdash;</span>
         </article>
+        <article class="card">
+          <span class="card-label">To copy</span>
+          <span class="card-value" id="tocopy-count">&mdash;</span>
+        </article>
+      </section>
+
+      <section class="actions" aria-label="Actions">
+        <article class="card card-cta">
+          <button class="btn btn-secondary" id="copy-btn" type="button">
+            <span class="btn-label" id="copy-btn-label">Copy from origin</span>
+            <span class="spinner" id="copy-spinner" hidden aria-hidden="true"></span>
+          </button>
+          <p class="hint" id="copy-hint">Copies new voice notes from the origin folder</p>
+        </article>
         <article class="card card-cta">
           <button class="btn" id="process-btn" type="button">
-            <span class="btn-label">Process now</span>
-            <span class="spinner" hidden aria-hidden="true"></span>
+            <span class="btn-label" id="process-btn-label">Process now</span>
+            <span class="spinner" id="process-spinner" hidden aria-hidden="true"></span>
           </button>
-          <p class="hint" id="btn-hint">Transcribes all pending voice notes</p>
+          <p class="hint" id="process-hint">Transcribes files already in the output folder</p>
         </article>
       </section>
 

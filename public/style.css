@@ -72,6 +72,13 @@ h1 {
   margin-bottom: 24px;
 }
 
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -125,6 +132,16 @@ h1 {
 
 .btn:hover:not(:disabled) {
   background: var(--accent-hover);
+}
+
+.btn-secondary {
+  background: var(--surface);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #eef2ff;
 }
 
 .btn:active:not(:disabled) {
@@ -284,7 +301,11 @@ h1 {
     grid-template-columns: 1fr 1fr;
   }
 
-  .card-cta {
+  .stats .card:last-child {
     grid-column: 1 / -1;
+  }
+
+  .actions {
+    grid-template-columns: 1fr;
   }
 }

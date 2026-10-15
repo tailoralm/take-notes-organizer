@@ -46,11 +46,11 @@ services:
   notes-organizer:
     build: .
     container_name: take-notes-organizer
-    depends_on:
-      whisper:
-        condition: service_healthy
     ports:
       - "127.0.0.1:8080:8080"
+    # Run the sources through ts-node with nodemon instead of the compiled dist/,
+    # so edits to src/ and public/ are picked up automatically (no rebuild).
+    command: npm run dev:server
     environment:
       WHISPER_URL: http://whisper:9000
       AUDIO_NOTES_FOLDER: /data/input
@@ -71,6 +71,10 @@ services:
     volumes:
       - ${AUDIO_NOTES_FOLDER:-./audio}:/data/input
       - ${AUDIO_NOTES_OUTPUT_FOLDER:-./transcripts}:/data/output
+      # Live-mounted source so code changes apply without rebuilding the image.
+      - ./src:/app/src
+      - ./public:/app/public
+      - ./tsconfig.json:/app/tsconfig.json:ro
 
 volumes:
   whisper-data:

@@ -2,7 +2,7 @@ import 'dotenv/config';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
-import { getStatus, loadConfig, processAll, type Config, type Logger } from './processor';
+import { copyAll, getStatus, loadConfig, processAll, type Config, type Logger } from './processor';
 
 const PORT = Number(process.env.PORT ?? 8080);
 const STATIC_DIR = path.join(__dirname, '..', 'public');
@@ -21,7 +21,7 @@ try {
   configError = error instanceof Error ? error.message : String(error);
 }
 
-let processing = false;
+let running = false;
 
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -58,13 +58,15 @@ function handleStatus(res: http.ServerResponse): void {
   }
 }
 
-function handleProcess(req: http.IncomingMessage, res: http.ServerResponse): void {
+type Run = (config: Config, logger: Logger) => Promise<object>;
+
+/**
+ * Runs one pipeline operation and streams its NDJSON log. Copy and process share
+ * the same lock, so only one of them can run at a time.
+ */
+function runStream(req: http.IncomingMessage, res: http.ServerResponse, run: Run): void {
   if (!config) {
     sendJson(res, 500, { error: configError });
-    return;
-  }
-  if (processing) {
-    sendJson(res, 409, { error: 'A processing run is already in progress.' });
     return;
   }
   if (req.method !== 'POST') {
@@ -72,8 +74,12 @@ function handleProcess(req: http.IncomingMessage, res: http.ServerResponse): voi
     res.end();
     return;
   }
+  if (running) {
+    sendJson(res, 409, { error: 'Another run is already in progress.' });
+    return;
+  }
 
-  processing = true;
+  running = true;
   res.writeHead(200, {
     'Content-Type': 'application/x-ndjson; charset=utf-8',
     'Cache-Control': 'no-store',
@@ -86,7 +92,7 @@ function handleProcess(req: http.IncomingMessage, res: http.ServerResponse): voi
     error: (message) => streamEvent(res, 'log', { level: 'error', message }),
   };
 
-  processAll(config, logger)
+  run(config, logger)
     .then((result) => {
       res.write(JSON.stringify({ type: 'done', ...result }) + '\n');
     })
@@ -96,7 +102,7 @@ function handleProcess(req: http.IncomingMessage, res: http.ServerResponse): voi
       streamEvent(res, 'error', { message });
     })
     .finally(() => {
-      processing = false;
+      running = false;
       res.end();
     });
 }
@@ -108,8 +114,11 @@ const server = http.createServer((req, res) => {
     case '/api/status':
       handleStatus(res);
       return;
+    case '/api/copy':
+      runStream(req, res, copyAll);
+      return;
     case '/api/process':
-      handleProcess(req, res);
+      runStream(req, res, processAll);
       return;
     case '/':
       sendStatic(res, '/index.html');

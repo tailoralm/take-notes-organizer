@@ -28,7 +28,7 @@ export function silenceFilter(thresholdDb: number, trimSeconds: number): string 
   const db = `${thresholdDb}dB`;
   return (
     'silenceremove=' +
-    `start_periods=1:start_duration=0.4:start_threshold=${db},` +
+    `start_periods=1:start_duration=0.4:start_threshold=${db}:` +
     `stop_periods=-1:stop_duration=${trimSeconds}:stop_threshold=${db}:stop_silence=0.8`
   );
 }
