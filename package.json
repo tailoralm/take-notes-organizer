@@ -8,7 +8,9 @@
     "serve": "ts-node src/server.ts",
     "dev": "nodemon --watch src --exec ts-node src/index.ts",
     "dev:server": "nodemon --watch src --exec ts-node src/server.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node -r ts-node/register --test test/*.test.ts",
+    "mock": "ts-node scripts/mock-whisper.ts"
   },
   "keywords": [
     "whisper",
