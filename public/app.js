@@ -3,6 +3,7 @@ const els = {
   processed: document.getElementById('processed-count'),
   pending: document.getElementById('pending-count'),
   toCopy: document.getElementById('tocopy-count'),
+  toRefine: document.getElementById('torefine-count'),
   copyBtn: document.getElementById('copy-btn'),
   copyLabel: document.getElementById('copy-btn-label'),
   copySpinner: document.getElementById('copy-spinner'),
@@ -11,6 +12,10 @@ const els = {
   processLabel: document.getElementById('process-btn-label'),
   processSpinner: document.getElementById('process-spinner'),
   processHint: document.getElementById('process-hint'),
+  refineBtn: document.getElementById('refine-btn'),
+  refineLabel: document.getElementById('refine-btn-label'),
+  refineSpinner: document.getElementById('refine-spinner'),
+  refineHint: document.getElementById('refine-hint'),
   clearBtn: document.getElementById('clear-btn'),
   logPanel: document.getElementById('log-panel'),
 };
@@ -31,6 +36,14 @@ const OPERATIONS = {
     busyLabel: 'Processing',
     idleHint: 'Transcribes files already in the output folder',
     busyHint: 'Transcriptions can take a while, keep this tab open',
+  },
+  refine: {
+    endpoint: '/api/refine',
+    starting: 'Requesting refine run...',
+    idleLabel: 'Refine with LLM',
+    busyLabel: 'Refining',
+    idleHint: 'Refines transcribed notes into markdown via LMStudio',
+    busyHint: 'The local LLM is working, keep this tab open',
   },
 };
 
@@ -53,6 +66,7 @@ async function refreshStatus() {
     els.processed.textContent = String(data.processed);
     els.pending.textContent = String(data.pending);
     els.toCopy.textContent = String(data.toCopy);
+    els.toRefine.textContent = String(data.toRefine);
     hideBanner();
   } catch (error) {
     showBanner(`Cannot load status: ${error.message}`);
@@ -84,6 +98,7 @@ function handleEvent(event) {
     const parts = [];
     if (typeof event.copied === 'number') parts.push(`${event.copied} copied`);
     if (typeof event.transcribed === 'number') parts.push(`${event.transcribed} transcribed`);
+    if (typeof event.refined === 'number') parts.push(`${event.refined} refined`);
     appendLog('success', `Finished. ${parts.join(', ') || 'nothing to do'}.`);
   }
 }
@@ -94,6 +109,7 @@ function setBusy(kind) {
 
   els.copyBtn.disabled = busy;
   els.processBtn.disabled = busy;
+  els.refineBtn.disabled = busy;
 
   const copy = OPERATIONS.copy;
   els.copySpinner.hidden = kind !== 'copy';
@@ -104,6 +120,11 @@ function setBusy(kind) {
   els.processSpinner.hidden = kind !== 'process';
   els.processLabel.textContent = kind === 'process' ? process.busyLabel : process.idleLabel;
   els.processHint.textContent = kind === 'process' ? process.busyHint : process.idleHint;
+
+  const refine = OPERATIONS.refine;
+  els.refineSpinner.hidden = kind !== 'refine';
+  els.refineLabel.textContent = kind === 'refine' ? refine.busyLabel : refine.idleLabel;
+  els.refineHint.textContent = kind === 'refine' ? refine.busyHint : refine.idleHint;
 }
 
 async function runOperation(kind) {
@@ -172,6 +193,7 @@ async function runOperation(kind) {
 
 els.copyBtn.addEventListener('click', () => runOperation('copy'));
 els.processBtn.addEventListener('click', () => runOperation('process'));
+els.refineBtn.addEventListener('click', () => runOperation('refine'));
 els.clearBtn.addEventListener('click', () => {
   els.logPanel.textContent = '';
 });

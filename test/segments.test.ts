@@ -10,7 +10,7 @@ import {
   offsetSegments,
   segmentsToText,
   type Segment,
-} from '../src/segments';
+} from '../src/audio/segments';
 
 function segment(text: string, start = 0, end = 1): Segment {
   return { start, end, text };

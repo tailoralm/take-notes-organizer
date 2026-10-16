@@ -1,7 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { Config } from './processor';
-import type { Segment } from './segments';
+import type { Config } from '../config/config';
+import type { Logger } from '../core/logger';
+import type { Segment } from '../audio/segments';
 
 export interface TranscribeOptions {
   /** Per-request beam size override (faster-whisper `beam`), e.g. 1. */
@@ -70,4 +71,26 @@ export async function transcribeAudio(
   }
 
   return { segments, text: text || segments.map((s) => s.text).join(' ') };
+}
+
+/**
+ * Polls the Whisper server until its model list answers. large-v3 on CUDA can
+ * load slowly, so the default timeout is generous (10 minutes).
+ */
+export async function waitForWhisper(config: Config, logger: Logger, timeoutMs = 10 * 60 * 1000): Promise<void> {
+  const startedAt = Date.now();
+  const headers = config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : undefined;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const res = await fetch(`${config.whisperUrl}/v1/models`, { headers });
+      if (res.ok) return;
+    } catch {
+      // server not up yet
+    }
+    logger.info('Waiting for Whisper server to be ready...');
+    await new Promise((resolve) => setTimeout(resolve, 10_000));
+  }
+
+  throw new Error(`Whisper server not ready at ${config.whisperUrl} after ${timeoutMs / 1000}s`);
 }

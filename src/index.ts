@@ -1,5 +1,8 @@
 import 'dotenv/config';
-import { consoleLogger, copyAll, loadConfig, processAll } from './processor';
+import { loadConfig } from './config/config';
+import { consoleLogger } from './core/logger';
+import { copyAll } from './services/copy-service';
+import { processAll } from './services/process-service';
 
 async function main(): Promise<void> {
   const config = loadConfig();

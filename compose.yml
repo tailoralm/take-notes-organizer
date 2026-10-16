@@ -68,6 +68,13 @@ services:
       WHISPER_COMPRESSION_RATIO: ${WHISPER_COMPRESSION_RATIO:-2.4}
       WHISPER_SILENCE_THRESHOLD_DB: ${WHISPER_SILENCE_THRESHOLD_DB:--35}
       WHISPER_SILENCE_TRIM_SECONDS: ${WHISPER_SILENCE_TRIM_SECONDS:-2}
+      # LLM refinement: LMStudio runs on the host, so the container reaches it
+      # through host.docker.internal (set LMSTUDIO_URL in .env to override).
+      LMSTUDIO_URL: ${LMSTUDIO_URL:-http://host.docker.internal:1234/v1}
+      LMSTUDIO_MODEL: ${LMSTUDIO_MODEL:-local-model}
+      LMSTUDIO_API_KEY: ${LMSTUDIO_API_KEY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ${AUDIO_NOTES_FOLDER:-./audio}:/data/input
       - ${AUDIO_NOTES_OUTPUT_FOLDER:-./transcripts}:/data/output
@@ -75,6 +82,9 @@ services:
       - ./src:/app/src
       - ./public:/app/public
       - ./tsconfig.json:/app/tsconfig.json:ro
+      # package.json is mounted too, so script changes (e.g. the server entry path)
+      # apply without rebuilding; deps are still installed in the image.
+      - ./package.json:/app/package.json:ro
 
 volumes:
   whisper-data:

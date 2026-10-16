@@ -5,9 +5,9 @@
   "main": "src/index.ts",
   "scripts": {
     "start": "ts-node src/index.ts",
-    "serve": "ts-node src/server.ts",
+    "serve": "ts-node src/server/server.ts",
     "dev": "nodemon --watch src --exec ts-node src/index.ts",
-    "dev:server": "nodemon --watch src --exec ts-node src/server.ts",
+    "dev:server": "nodemon --watch src --exec ts-node src/server/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "node -r ts-node/register --test test/*.test.ts",
     "mock": "ts-node scripts/mock-whisper.ts"

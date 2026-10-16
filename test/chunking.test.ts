@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildChunks } from '../src/chunking';
-import type { Silence } from '../src/audio';
+import { buildChunks } from '../src/audio/chunking';
+import type { Silence } from '../src/audio/audio';
 
 const silence = (start: number, end: number): Silence => ({ start, end });
 

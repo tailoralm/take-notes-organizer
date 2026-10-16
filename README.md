@@ -8,7 +8,8 @@ live logs.
 
 ## How it works
 
-Copying and transcribing are two independent steps sharing the same code (`src/processor.ts`):
+Copying, transcribing and refining are three independent steps, each a service in
+`src/services/` sharing the same pipeline code:
 
 - **Copy run** (`copyAll`) is the only step that reads the input (origin) folder. It scans it
   for `voice_<ISO-8601 timestamp>.ogg` files, copies the ones not yet copied or transcribed
@@ -17,6 +18,12 @@ Copying and transcribing are two independent steps sharing the same code (`src/p
   (copied by the copy run, or moved in by hand to re-run a transcription). For each it writes
   the `.txt`, moves the pair into `processed/`, and marks it transcribed in `transcripts.json`.
   It never reads the input folder.
+- **Refine run** (`refineAll`) refines the transcriptions that are already done (transcribed
+  but not yet refined) with the local LMStudio LLM. For each it writes the refined text to
+  `processed/<name>.refined.txt`, an Obsidian-ready note to `notes/<name>.md`, and records
+  `title`, `tags`, `resume` and `refinedByLLM` in `transcripts.json`. The raw `.txt` is left
+  untouched. Refinement is exposed through the web UI ("Refine with LLM"); it is not part of
+  the one-shot CLI.
 
 The one-shot CLI (`npm start`) runs copy then process in order. `transcripts.json` is the
 single source of truth for the state.
@@ -25,7 +32,7 @@ In the web UI, **Copy from origin** is the only button that copies, and **Proces
 transcribes files already in the output folder — so you can drop a file back in (or edit the
 JSON) and re-process without touching the origin folder.
 
-Each file goes through the pipeline in `src/transcriber.ts`:
+Each file goes through the transcription pipeline in `src/services/transcription-service.ts`:
 
 1. **Preprocess** — the `.ogg` is converted to a 16 kHz mono WAV with `ffmpeg` and
    long silences are trimmed (`silenceremove`), shortening the quiet stretches where
@@ -89,19 +96,37 @@ docker compose run --rm notes-organizer npm start
 | `WHISPER_COMPRESSION_RATIO` | `2.4` | Chunk text gzip ratio above this flags a chunk. |
 | `WHISPER_SILENCE_THRESHOLD_DB` | `-35` | Sound level (dB) under which a region counts as silence. |
 | `WHISPER_SILENCE_TRIM_SECONDS` | `2` | Internal silences longer than this are trimmed during preprocessing. |
+| `LMSTUDIO_URL` | `http://127.0.0.1:1234/v1` | Base URL of the LMStudio OpenAI-compatible server (in Docker: `host.docker.internal:1234/v1`). |
+| `LMSTUDIO_MODEL` | `local-model` | Id of the model loaded in LMStudio. |
+| `LMSTUDIO_API_KEY` | *(empty)* | Optional Bearer token for the LMStudio server. |
 
-The `WHISPER_*` variables are also declared in `docker-compose.yml` for the
+The `WHISPER_*` and `LMSTUDIO_*` variables are also declared in `docker-compose.yml` for the
 `notes-organizer` service; the values there use `${VAR:-default}` interpolation so
 they can be overridden from the project `.env`.
 
 ## Development
 
 - `npm start` — one-shot CLI run.
-- `npm run serve` — web UI server (`src/server.ts`).
+- `npm run serve` — web UI server (`src/server/server.ts`).
 - `npm run dev` / `npm run dev:server` — nodemon with hot reload.
 - `npm run typecheck` — `tsc --noEmit`. Always run after changes.
 - `npm test` — unit tests for the repetition detector, chunk merging and chunk
   building (`node:test`, no extra dependencies).
+
+### Source layout
+
+`src/` is split into modules by layer:
+
+- `config/` — `Config` + `loadConfig`, and the shared path/name constants.
+- `core/` — the `Logger` abstraction and console logger.
+- `clients/` — HTTP clients: `whisper-client` and `lmstudio-client` (plus readiness checks).
+- `repositories/` — `transcripts-repository`, the file-backed store for `transcripts.json`.
+- `services/` — pipeline steps (`copy-service`, `process-service`, `refine-service`,
+  `transcription-service`) and shared lookups (`inventory-service`, `status-service`).
+- `audio/` — ffmpeg helpers, silence-aware chunking and segment utilities.
+- `domain/` — shared types such as `RefineResult`.
+- `prompts/` — the refinement prompt.
+- `server/` — the `node:http` web UI server; `index.ts` is the one-shot CLI entry.
 
 ## Testing
 

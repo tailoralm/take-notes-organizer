@@ -33,6 +33,10 @@
           <span class="card-label">To copy</span>
           <span class="card-value" id="tocopy-count">&mdash;</span>
         </article>
+        <article class="card">
+          <span class="card-label">To refine</span>
+          <span class="card-value" id="torefine-count">&mdash;</span>
+        </article>
       </section>
 
       <section class="actions" aria-label="Actions">
@@ -49,6 +53,13 @@
             <span class="spinner" id="process-spinner" hidden aria-hidden="true"></span>
           </button>
           <p class="hint" id="process-hint">Transcribes files already in the output folder</p>
+        </article>
+        <article class="card card-cta">
+          <button class="btn btn-refine" id="refine-btn" type="button">
+            <span class="btn-label" id="refine-btn-label">Refine with LLM</span>
+            <span class="spinner" id="refine-spinner" hidden aria-hidden="true"></span>
+          </button>
+          <p class="hint" id="refine-hint">Refines transcribed notes into markdown via LMStudio</p>
         </article>
       </section>
 

@@ -1,9 +1,10 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { Config, Logger } from './processor';
-import { convertToWav, detectSilence, extractWav, getDuration, type Silence } from './audio';
-import { buildChunks, type Chunk } from './chunking';
+import type { Config } from '../config/config';
+import type { Logger } from '../core/logger';
+import { convertToWav, detectSilence, extractWav, getDuration, type Silence } from '../audio/audio';
+import { buildChunks, type Chunk } from '../audio/chunking';
 import {
   collapseConsecutiveDuplicates,
   detectRepetition,
@@ -13,8 +14,8 @@ import {
   offsetSegments,
   segmentsToText,
   type Segment,
-} from './segments';
-import { transcribeAudio, type TranscribeOptions } from './whisper';
+} from '../audio/segments';
+import { transcribeAudio, type TranscribeOptions } from '../clients/whisper-client';
 
 const SILENCE_TOLERANCE = 0.5;
 

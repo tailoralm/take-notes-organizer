@@ -2,10 +2,15 @@ import 'dotenv/config';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
-import { copyAll, getStatus, loadConfig, processAll, type Config, type Logger } from './processor';
+import { loadConfig, type Config } from '../config/config';
+import type { Logger } from '../core/logger';
+import { copyAll } from '../services/copy-service';
+import { processAll } from '../services/process-service';
+import { refineAll } from '../services/refine-service';
+import { getStatus } from '../services/status-service';
 
 const PORT = Number(process.env.PORT ?? 8080);
-const STATIC_DIR = path.join(__dirname, '..', 'public');
+const STATIC_DIR = path.join(__dirname, '..', '..', 'public');
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -61,8 +66,8 @@ function handleStatus(res: http.ServerResponse): void {
 type Run = (config: Config, logger: Logger) => Promise<object>;
 
 /**
- * Runs one pipeline operation and streams its NDJSON log. Copy and process share
- * the same lock, so only one of them can run at a time.
+ * Runs one pipeline operation and streams its NDJSON log. Copy, process and
+ * refine share the same lock, so only one of them can run at a time.
  */
 function runStream(req: http.IncomingMessage, res: http.ServerResponse, run: Run): void {
   if (!config) {
@@ -119,6 +124,9 @@ const server = http.createServer((req, res) => {
       return;
     case '/api/process':
       runStream(req, res, processAll);
+      return;
+    case '/api/refine':
+      runStream(req, res, refineAll);
       return;
     case '/':
       sendStatic(res, '/index.html');
