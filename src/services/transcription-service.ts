@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { Config } from '../config/config';
+import { throwIfAborted } from '../core/cancellation';
 import type { Logger } from '../core/logger';
 import { convertToWav, detectSilence, extractWav, getDuration, type Silence } from '../audio/audio';
 import { buildChunks, type Chunk } from '../audio/chunking';
@@ -61,13 +62,15 @@ async function transcribeWavRanges(
   workDir: string,
   prefix: string,
   options: Strategy,
+  signal?: AbortSignal,
 ): Promise<Segment[]> {
   const groups: Segment[][] = [];
   for (let i = 0; i < ranges.length; i++) {
+    throwIfAborted(signal);
     const { start, end } = ranges[i];
     const rangeWav = path.join(workDir, `${prefix}-${i}.wav`);
     await extractWav(srcWav, rangeWav, start, end);
-    const result = await transcribeAudio(config, rangeWav, options);
+    const result = await transcribeAudio(config, rangeWav, options, signal);
     groups.push(offsetSegments(result.segments, start));
   }
   return mergeSegments(...groups);
@@ -104,11 +107,13 @@ async function transcribeChunk(
   workDir: string,
   prefix: string,
   baseName: string,
+  signal?: AbortSignal,
 ): Promise<{ segments: Segment[]; flagged: boolean }> {
   const attempts: ChunkAttempt[] = [];
   const strategies = buildStrategies(config).slice(0, Math.min(config.maxRetries, 2) + 1);
 
   for (const strategy of strategies) {
+    throwIfAborted(signal);
     let segments: Segment[];
     try {
       const ranges: Chunk[] = strategy.small
@@ -120,8 +125,9 @@ async function transcribeChunk(
             SILENCE_TOLERANCE,
           ).map((sub) => ({ start: sub.start + chunk.start, end: sub.end + chunk.start }))
         : [{ start: chunk.start, end: chunk.end }];
-      segments = await transcribeWavRanges(config, wavPath, ranges, workDir, `${prefix}-${strategy.label}`, strategy);
+      segments = await transcribeWavRanges(config, wavPath, ranges, workDir, `${prefix}-${strategy.label}`, strategy, signal);
     } catch (error) {
+      throwIfAborted(signal);
       const message = error instanceof Error ? error.message : String(error);
       attempts.push({
         label: strategy.label,
@@ -211,7 +217,9 @@ export async function transcribeFile(
   logger: Logger,
   baseName: string,
   inputPath: string,
+  signal?: AbortSignal,
 ): Promise<FileTranscript> {
+  throwIfAborted(signal);
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'notes-organizer-'));
   try {
     const wavPath = path.join(workDir, `${baseName}.wav`);
@@ -236,6 +244,7 @@ export async function transcribeFile(
     let possibleHallucination = false;
     const results: ChunkResult[] = [];
     for (let i = 0; i < chunks.length; i++) {
+      throwIfAborted(signal);
       logger.info(`Transcribing chunk ${i + 1}/${chunks.length} (${formatTime(chunks[i].start)}-${formatTime(chunks[i].end)}).`);
       const result = await transcribeChunk(
         config,
@@ -246,6 +255,7 @@ export async function transcribeFile(
         workDir,
         `chunk${i}`,
         baseName,
+        signal,
       );
       results.push({ chunk: chunks[i], ...result });
       if (result.flagged) possibleHallucination = true;

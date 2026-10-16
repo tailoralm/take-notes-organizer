@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Config } from '../config/config';
+import { throwIfAborted } from '../core/cancellation';
 import type { Logger } from '../core/logger';
 import { waitForWhisper } from '../clients/whisper-client';
 import { openDb, pendingVoiceNotes } from './inventory-service';
@@ -15,7 +16,11 @@ export interface ProcessingResult {
  * copy run or moved in by hand). Each file is moved into processed/ with its txt
  * once transcribed. This run never copies from the origin folder.
  */
-export async function processAll(config: Config, logger: Logger): Promise<ProcessingResult> {
+export async function processAll(
+  config: Config,
+  logger: Logger,
+  signal?: AbortSignal,
+): Promise<ProcessingResult> {
   const { db, processedDir } = openDb(config, logger);
 
   const pending = pendingVoiceNotes(config, db);
@@ -24,14 +29,15 @@ export async function processAll(config: Config, logger: Logger): Promise<Proces
     return { transcribed: 0 };
   }
 
-  await waitForWhisper(config, logger);
+  await waitForWhisper(config, logger, signal);
 
   let transcribed = 0;
   for (const name of pending) {
+    throwIfAborted(signal);
     const workingAudio = path.join(config.outputFolder, name);
 
     logger.info(`Transcribing ${name}`);
-    const { text } = await transcribeFile(config, logger, name.replace(/\.ogg$/, ''), workingAudio);
+    const { text } = await transcribeFile(config, logger, name.replace(/\.ogg$/, ''), workingAudio, signal);
 
     const txtName = name.replace(/\.ogg$/, '.txt');
     fs.writeFileSync(path.join(config.outputFolder, txtName), text, 'utf8');

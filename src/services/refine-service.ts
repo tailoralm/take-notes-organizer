@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Config } from '../config/config';
 import { NOTES_DIR } from '../config/constants';
+import { throwIfAborted } from '../core/cancellation';
 import type { Logger } from '../core/logger';
 import type { RefineResult } from '../domain/refinement';
 import { refineText, waitForLmStudio } from '../clients/lmstudio-client';
@@ -52,7 +53,7 @@ function renderMarkdownNote(audioFile: string, result: RefineResult): string {
  * and records title, tags, resume and refinedByLLM in the JSON. The raw .txt is
  * never touched. This run does not transcribe or copy.
  */
-export async function refineAll(config: Config, logger: Logger): Promise<RefiningResult> {
+export async function refineAll(config: Config, logger: Logger, signal?: AbortSignal): Promise<RefiningResult> {
   const { db, processedDir } = openDb(config, logger);
   const notesDir = path.join(config.outputFolder, NOTES_DIR);
   fs.mkdirSync(notesDir, { recursive: true });
@@ -63,10 +64,11 @@ export async function refineAll(config: Config, logger: Logger): Promise<Refinin
     return { refined: 0 };
   }
 
-  await waitForLmStudio(config, logger);
+  await waitForLmStudio(config, logger, signal);
 
   let refined = 0;
   for (const name of pending) {
+    throwIfAborted(signal);
     const txtName = name.replace(/\.ogg$/, '.txt');
     let raw: string;
     try {
@@ -82,7 +84,7 @@ export async function refineAll(config: Config, logger: Logger): Promise<Refinin
 
     logger.info(`Refining ${name}`);
     try {
-      const result = await refineText(config, logger, raw);
+      const result = await refineText(config, logger, raw, signal);
       const refinedName = name.replace(/\.ogg$/, '.refined.txt');
       fs.writeFileSync(path.join(processedDir, refinedName), result.refinedText + '\n', 'utf8');
       fs.writeFileSync(path.join(notesDir, name.replace(/\.ogg$/, '.md')), renderMarkdownNote(name, result), 'utf8');
@@ -97,6 +99,7 @@ export async function refineAll(config: Config, logger: Logger): Promise<Refinin
       refined++;
       logger.success(`Refined ${name}`);
     } catch (error) {
+      throwIfAborted(signal);
       logger.error(`Failed to refine ${name}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }

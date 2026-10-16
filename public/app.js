@@ -1,9 +1,9 @@
 const els = {
   banner: document.getElementById('banner'),
-  processed: document.getElementById('processed-count'),
+  transcribed: document.getElementById('transcribed-count'),
   pending: document.getElementById('pending-count'),
   toCopy: document.getElementById('tocopy-count'),
-  toRefine: document.getElementById('torefine-count'),
+  refined: document.getElementById('refined-count'),
   copyBtn: document.getElementById('copy-btn'),
   copyLabel: document.getElementById('copy-btn-label'),
   copySpinner: document.getElementById('copy-spinner'),
@@ -16,6 +16,10 @@ const els = {
   refineLabel: document.getElementById('refine-btn-label'),
   refineSpinner: document.getElementById('refine-spinner'),
   refineHint: document.getElementById('refine-hint'),
+  stopBtn: document.getElementById('stop-btn'),
+  stopLabel: document.getElementById('stop-btn-label'),
+  stopSpinner: document.getElementById('stop-spinner'),
+  stopHint: document.getElementById('stop-hint'),
   clearBtn: document.getElementById('clear-btn'),
   logPanel: document.getElementById('log-panel'),
 };
@@ -31,9 +35,9 @@ const OPERATIONS = {
   },
   process: {
     endpoint: '/api/process',
-    starting: 'Requesting processing run...',
-    idleLabel: 'Process now',
-    busyLabel: 'Processing',
+    starting: 'Requesting transcription run...',
+    idleLabel: 'Transcribe',
+    busyLabel: 'Transcribing',
     idleHint: 'Transcribes files already in the output folder',
     busyHint: 'Transcriptions can take a while, keep this tab open',
   },
@@ -48,6 +52,7 @@ const OPERATIONS = {
 };
 
 let running = null;
+let stopping = false;
 
 function showBanner(message) {
   els.banner.textContent = message;
@@ -63,10 +68,10 @@ async function refreshStatus() {
     const res = await fetch('/api/status');
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `Status request failed (${res.status})`);
-    els.processed.textContent = String(data.processed);
-    els.pending.textContent = String(data.pending);
     els.toCopy.textContent = String(data.toCopy);
-    els.toRefine.textContent = String(data.toRefine);
+    els.pending.textContent = String(data.pending);
+    els.transcribed.textContent = String(data.transcribed);
+    els.refined.textContent = String(data.refined);
     hideBanner();
   } catch (error) {
     showBanner(`Cannot load status: ${error.message}`);
@@ -94,6 +99,8 @@ function handleEvent(event) {
     appendLog(event.level, event.message);
   } else if (event.type === 'error') {
     appendLog('error', event.message);
+  } else if (event.type === 'stopped') {
+    appendLog('warn', event.message || 'Operation stopped.');
   } else if (event.type === 'done') {
     const parts = [];
     if (typeof event.copied === 'number') parts.push(`${event.copied} copied`);
@@ -111,6 +118,14 @@ function setBusy(kind) {
   els.processBtn.disabled = busy;
   els.refineBtn.disabled = busy;
 
+  // The stop button is the only one enabled while an operation runs.
+  els.stopBtn.disabled = !busy || stopping;
+  els.stopSpinner.hidden = !stopping;
+  els.stopLabel.textContent = stopping ? 'Stopping' : 'Stop operation';
+  els.stopHint.textContent = busy
+    ? 'Stops the operation that is currently running'
+    : 'Available while an operation is running';
+
   const copy = OPERATIONS.copy;
   els.copySpinner.hidden = kind !== 'copy';
   els.copyLabel.textContent = kind === 'copy' ? copy.busyLabel : copy.idleLabel;
@@ -125,6 +140,27 @@ function setBusy(kind) {
   els.refineSpinner.hidden = kind !== 'refine';
   els.refineLabel.textContent = kind === 'refine' ? refine.busyLabel : refine.idleLabel;
   els.refineHint.textContent = kind === 'refine' ? refine.busyHint : refine.idleHint;
+}
+
+async function stopOperation() {
+  if (!running || stopping) return;
+  stopping = true;
+  setBusy(running);
+  appendLog('warn', 'Stopping the running operation...');
+
+  try {
+    const res = await fetch('/api/stop', { method: 'POST' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      stopping = false;
+      setBusy(running);
+      appendLog('error', data.error || `Could not stop the operation (${res.status}).`);
+    }
+  } catch (error) {
+    stopping = false;
+    setBusy(running);
+    appendLog('error', `Could not stop the operation: ${error.message}`);
+  }
 }
 
 async function runOperation(kind) {
@@ -186,6 +222,7 @@ async function runOperation(kind) {
   } catch (error) {
     appendLog('error', `Connection error: ${error.message}`);
   } finally {
+    stopping = false;
     setBusy(null);
     refreshStatus();
   }
@@ -194,6 +231,7 @@ async function runOperation(kind) {
 els.copyBtn.addEventListener('click', () => runOperation('copy'));
 els.processBtn.addEventListener('click', () => runOperation('process'));
 els.refineBtn.addEventListener('click', () => runOperation('refine'));
+els.stopBtn.addEventListener('click', stopOperation);
 els.clearBtn.addEventListener('click', () => {
   els.logPanel.textContent = '';
 });

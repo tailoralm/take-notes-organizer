@@ -43,7 +43,8 @@ Copied from `.env.example` into `.env` (`.env` is git-ignored).
 - `src/index.ts` — one-shot CLI entry: loads config, runs `copyAll()` then `processAll()`, exits.
 - `src/config/` — `config.ts` (`Config`, `loadConfig`) and `constants.ts` (paths and the
   voice-note name pattern).
-- `src/core/` — `logger.ts` (`Logger`, `consoleLogger`).
+- `src/core/` — `logger.ts` (`Logger`, `consoleLogger`) and `cancellation.ts`
+  (`OperationCancelledError`, `throwIfAborted`, `delay`) for cooperative stop support.
 - `src/clients/` — `whisper-client.ts` and `lmstudio-client.ts` (HTTP calls + readiness polls).
 - `src/repositories/` — `transcripts-repository.ts` (`TranscriptsDb`, the file-backed store for
   `transcripts.json`).
@@ -88,9 +89,10 @@ Refine run (`src/services/refine-service.ts` `refineAll()`) — refines transcri
 
 ## Web UI API
 
-- `GET /api/status` — JSON `{ "processed": number, "pending": number, "toCopy": number, "toRefine": number }`.
+- `GET /api/status` — JSON `{ "toCopy": number, "pending": number, "transcribed": number, "refined": number }`.
   `pending` counts voice notes in the output folder not yet transcribed; `toCopy` counts voice
-  notes still only in the origin folder; `toRefine` counts transcribed notes not yet refined.
+  notes still only in the origin folder; `transcribed` counts transcribed notes; `refined` counts
+  notes already refined by the LLM.
 - `POST /api/copy` — runs `copyAll()`; streams **NDJSON** log lines
   (`{"type":"log","level":"info|success|warn|error","message":"..."}`) followed by a terminal
   `{"type":"done","copied":n}` or `{"type":"error","message":"..."}`.
@@ -98,6 +100,10 @@ Refine run (`src/services/refine-service.ts` `refineAll()`) — refines transcri
   `{"type":"done","transcribed":n}` or `{"type":"error","message":"..."}`.
 - `POST /api/refine` — runs `refineAll()`; same NDJSON stream, terminal
   `{"type":"done","refined":n}` or `{"type":"error","message":"..."}`.
+- `POST /api/stop` — aborts the pipeline operation currently in progress. The running stream then
+  emits `{"type":"stopped","message":"..."}` instead of `done` and ends; returns `409` when no
+  operation is running. Cancellation is cooperative (checked between files/chunks and on network
+  calls) via an `AbortSignal` threaded from `src/core/cancellation.ts`.
 - Copy, process and refine share one run lock: only one may run at a time; a second concurrent call
   returns `409`.
 - `GET /` serves `public/index.html`; `/style.css` and `/app.js` are served as static files.

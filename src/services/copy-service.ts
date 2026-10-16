@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Config } from '../config/config';
+import { throwIfAborted } from '../core/cancellation';
 import type { Logger } from '../core/logger';
 import { copyPendingVoiceNotes, openDb } from './inventory-service';
 
@@ -13,7 +14,7 @@ export interface CopyResult {
  * and records them as copied in the JSON. Copying never transcribes; the files
  * land in the output folder where "process" picks them up.
  */
-export async function copyAll(config: Config, logger: Logger): Promise<CopyResult> {
+export async function copyAll(config: Config, logger: Logger, signal?: AbortSignal): Promise<CopyResult> {
   const { db } = openDb(config, logger);
 
   const pending = copyPendingVoiceNotes(config, db);
@@ -24,6 +25,7 @@ export async function copyAll(config: Config, logger: Logger): Promise<CopyResul
 
   let copied = 0;
   for (const name of pending) {
+    throwIfAborted(signal);
     const srcPath = path.join(config.inputFolder, name);
     const destPath = path.join(config.outputFolder, name);
     try {

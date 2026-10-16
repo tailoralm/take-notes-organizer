@@ -74,7 +74,7 @@ h1 {
 
 .actions {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 16px;
   margin-bottom: 24px;
 }
@@ -150,6 +150,18 @@ h1 {
 
 .btn-refine:hover:not(:disabled) {
   background: linear-gradient(135deg, #6d28d9, #9333ea);
+}
+
+.card-cta-stop {
+  background: linear-gradient(135deg, #fef2f2, #fee2e2);
+}
+
+.btn-stop {
+  background: #dc2626;
+}
+
+.btn-stop:hover:not(:disabled) {
+  background: #b91c1c;
 }
 
 .btn:active:not(:disabled) {

@@ -22,20 +22,20 @@
 
       <section class="stats" aria-label="Statistics">
         <article class="card">
-          <span class="card-label">Processed</span>
-          <span class="card-value" id="processed-count">&mdash;</span>
-        </article>
-        <article class="card">
-          <span class="card-label">To process</span>
-          <span class="card-value" id="pending-count">&mdash;</span>
-        </article>
-        <article class="card">
           <span class="card-label">To copy</span>
           <span class="card-value" id="tocopy-count">&mdash;</span>
         </article>
         <article class="card">
-          <span class="card-label">To refine</span>
-          <span class="card-value" id="torefine-count">&mdash;</span>
+          <span class="card-label">To transcribe</span>
+          <span class="card-value" id="pending-count">&mdash;</span>
+        </article>
+        <article class="card">
+          <span class="card-label">Transcribed</span>
+          <span class="card-value" id="transcribed-count">&mdash;</span>
+        </article>
+        <article class="card">
+          <span class="card-label">Refined</span>
+          <span class="card-value" id="refined-count">&mdash;</span>
         </article>
       </section>
 
@@ -49,7 +49,7 @@
         </article>
         <article class="card card-cta">
           <button class="btn" id="process-btn" type="button">
-            <span class="btn-label" id="process-btn-label">Process now</span>
+            <span class="btn-label" id="process-btn-label">Transcribe</span>
             <span class="spinner" id="process-spinner" hidden aria-hidden="true"></span>
           </button>
           <p class="hint" id="process-hint">Transcribes files already in the output folder</p>
@@ -60,6 +60,13 @@
             <span class="spinner" id="refine-spinner" hidden aria-hidden="true"></span>
           </button>
           <p class="hint" id="refine-hint">Refines transcribed notes into markdown via LMStudio</p>
+        </article>
+        <article class="card card-cta card-cta-stop">
+          <button class="btn btn-stop" id="stop-btn" type="button" disabled>
+            <span class="btn-label" id="stop-btn-label">Stop operation</span>
+            <span class="spinner" id="stop-spinner" hidden aria-hidden="true"></span>
+          </button>
+          <p class="hint" id="stop-hint">Available while an operation is running</p>
         </article>
       </section>
 

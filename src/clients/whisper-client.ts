@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Config } from '../config/config';
+import { delay, OperationCancelledError, throwIfAborted } from '../core/cancellation';
 import type { Logger } from '../core/logger';
 import type { Segment } from '../audio/segments';
 
@@ -25,7 +26,9 @@ export async function transcribeAudio(
   config: Config,
   audioPath: string,
   options: TranscribeOptions = {},
+  signal?: AbortSignal,
 ): Promise<WhisperResult> {
+  throwIfAborted(signal);
   const form = new FormData();
   form.append('model', 'whisper-1');
   form.append('file', new Blob([fs.readFileSync(audioPath)]), path.basename(audioPath));
@@ -43,6 +46,7 @@ export async function transcribeAudio(
     method: 'POST',
     headers,
     body: form,
+    signal,
   });
 
   if (!res.ok) {
@@ -77,19 +81,25 @@ export async function transcribeAudio(
  * Polls the Whisper server until its model list answers. large-v3 on CUDA can
  * load slowly, so the default timeout is generous (10 minutes).
  */
-export async function waitForWhisper(config: Config, logger: Logger, timeoutMs = 10 * 60 * 1000): Promise<void> {
+export async function waitForWhisper(
+  config: Config,
+  logger: Logger,
+  signal?: AbortSignal,
+  timeoutMs = 10 * 60 * 1000,
+): Promise<void> {
   const startedAt = Date.now();
   const headers = config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : undefined;
 
   while (Date.now() - startedAt < timeoutMs) {
+    throwIfAborted(signal);
     try {
-      const res = await fetch(`${config.whisperUrl}/v1/models`, { headers });
+      const res = await fetch(`${config.whisperUrl}/v1/models`, { headers, signal });
       if (res.ok) return;
     } catch {
-      // server not up yet
+      if (signal?.aborted) throw new OperationCancelledError();
     }
     logger.info('Waiting for Whisper server to be ready...');
-    await new Promise((resolve) => setTimeout(resolve, 10_000));
+    await delay(10_000, signal);
   }
 
   throw new Error(`Whisper server not ready at ${config.whisperUrl} after ${timeoutMs / 1000}s`);

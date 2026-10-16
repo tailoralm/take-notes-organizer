@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
 import { loadConfig, type Config } from '../config/config';
+import { OperationCancelledError } from '../core/cancellation';
 import type { Logger } from '../core/logger';
 import { copyAll } from '../services/copy-service';
 import { processAll } from '../services/process-service';
@@ -27,6 +28,7 @@ try {
 }
 
 let running = false;
+let currentRun: AbortController | null = null;
 
 function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -63,11 +65,31 @@ function handleStatus(res: http.ServerResponse): void {
   }
 }
 
-type Run = (config: Config, logger: Logger) => Promise<object>;
+type Run = (config: Config, logger: Logger, signal: AbortSignal) => Promise<object>;
+
+/**
+ * Aborts the pipeline operation currently in progress, if any. The running
+ * stream then emits a `stopped` event and ends; the run lock is released.
+ */
+function handleStop(req: http.IncomingMessage, res: http.ServerResponse): void {
+  if (req.method !== 'POST') {
+    res.writeHead(405, { Allow: 'POST' });
+    res.end();
+    return;
+  }
+  if (!running || !currentRun) {
+    sendJson(res, 409, { error: 'No operation is running.' });
+    return;
+  }
+  currentRun.abort(new OperationCancelledError());
+  sendJson(res, 200, { stopped: true });
+}
 
 /**
  * Runs one pipeline operation and streams its NDJSON log. Copy, process and
- * refine share the same lock, so only one of them can run at a time.
+ * refine share the same lock, so only one of them can run at a time. The run
+ * can be aborted early with a stop request, in which case a `stopped` event is
+ * streamed instead of `done`.
  */
 function runStream(req: http.IncomingMessage, res: http.ServerResponse, run: Run): void {
   if (!config) {
@@ -85,6 +107,8 @@ function runStream(req: http.IncomingMessage, res: http.ServerResponse, run: Run
   }
 
   running = true;
+  const controller = new AbortController();
+  currentRun = controller;
   res.writeHead(200, {
     'Content-Type': 'application/x-ndjson; charset=utf-8',
     'Cache-Control': 'no-store',
@@ -97,17 +121,22 @@ function runStream(req: http.IncomingMessage, res: http.ServerResponse, run: Run
     error: (message) => streamEvent(res, 'log', { level: 'error', message }),
   };
 
-  run(config, logger)
+  run(config, logger, controller.signal)
     .then((result) => {
       res.write(JSON.stringify({ type: 'done', ...result }) + '\n');
     })
     .catch((error: unknown) => {
+      if (error instanceof OperationCancelledError) {
+        streamEvent(res, 'stopped', { message: error.message });
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       logger.error(message);
       streamEvent(res, 'error', { message });
     })
     .finally(() => {
       running = false;
+      currentRun = null;
       res.end();
     });
 }
@@ -127,6 +156,9 @@ const server = http.createServer((req, res) => {
       return;
     case '/api/refine':
       runStream(req, res, refineAll);
+      return;
+    case '/api/stop':
+      handleStop(req, res);
       return;
     case '/':
       sendStatic(res, '/index.html');

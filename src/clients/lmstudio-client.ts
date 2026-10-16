@@ -1,4 +1,5 @@
 import type { Config } from '../config/config';
+import { delay, OperationCancelledError, throwIfAborted } from '../core/cancellation';
 import type { Logger } from '../core/logger';
 import type { RefineResult } from '../domain/refinement';
 import { buildRefineUserPrompt, REFINE_SYSTEM_PROMPT } from '../prompts/refine-prompt';
@@ -48,14 +49,21 @@ function parseRefineResult(content: string): RefineResult {
  * returns the parsed refinement. Throws on transport or JSON errors so the
  * caller can leave the entry un-refined and retry it on the next run.
  */
-export async function refineText(config: Config, logger: Logger, text: string): Promise<RefineResult> {
+export async function refineText(
+  config: Config,
+  logger: Logger,
+  text: string,
+  signal?: AbortSignal,
+): Promise<RefineResult> {
+  throwIfAborted(signal);
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (config.lmstudioApiKey) headers.Authorization = `Bearer ${config.lmstudioApiKey}`;
 
+  const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
   const res = await fetch(`${config.lmstudioUrl}/chat/completions`, {
     method: 'POST',
     headers,
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal,
     body: JSON.stringify({
       model: config.lmstudioModel,
       temperature: 0,
@@ -92,15 +100,21 @@ function connectionErrorCode(error: unknown): string {
  * Polls the LMStudio server until its model list answers, mirroring the Whisper
  * readiness check. Refinement is only attempted once the server is reachable.
  */
-export async function waitForLmStudio(config: Config, logger: Logger, timeoutMs = 5 * 60 * 1000): Promise<void> {
+export async function waitForLmStudio(
+  config: Config,
+  logger: Logger,
+  signal?: AbortSignal,
+  timeoutMs = 5 * 60 * 1000,
+): Promise<void> {
   const startedAt = Date.now();
   const headers = config.lmstudioApiKey ? { Authorization: `Bearer ${config.lmstudioApiKey}` } : undefined;
 
   while (Date.now() - startedAt < timeoutMs) {
+    throwIfAborted(signal);
     try {
       const res = await fetch(`${config.lmstudioUrl}/models`, {
         headers,
-        signal: AbortSignal.timeout(10_000),
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
       });
       if (res.ok) return;
       const body = (await res.text()).slice(0, 300);
@@ -112,11 +126,12 @@ export async function waitForLmStudio(config: Config, logger: Logger, timeoutMs 
       }
       throw new Error(`LMStudio answered with an unexpected status (${res.status}): ${body}`);
     } catch (error) {
+      if (signal?.aborted) throw new OperationCancelledError();
       if (error instanceof Error && error.message.startsWith('LMStudio')) throw error;
       const detail = connectionErrorCode(error);
       logger.info(`Cannot reach LMStudio at ${config.lmstudioUrl}${detail}. Waiting for it to be ready...`);
     }
-    await new Promise((resolve) => setTimeout(resolve, 10_000));
+    await delay(10_000, signal);
   }
 
   throw new Error(
