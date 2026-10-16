@@ -43,48 +43,59 @@ services:
               capabilities:
                 - gpu
 
-  notes-organizer:
-    build: .
-    container_name: take-notes-organizer
-    ports:
-      - "127.0.0.1:8080:8080"
-    # Run the sources through ts-node with nodemon instead of the compiled dist/,
-    # so edits to src/ and public/ are picked up automatically (no rebuild).
-    command: npm run dev:server
-    environment:
-      WHISPER_URL: http://whisper:9000
-      AUDIO_NOTES_FOLDER: /data/input
-      AUDIO_NOTES_OUTPUT_FOLDER: /data/output
-      PORT: 8080
-      # Pipeline options (see README; defaults match the .env.example values)
-      WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-pt}
-      WHISPER_CHUNK_SECONDS: ${WHISPER_CHUNK_SECONDS:-300}
-      WHISPER_CHUNK_OVERLAP_SECONDS: ${WHISPER_CHUNK_OVERLAP_SECONDS:-1}
-      WHISPER_SMALL_CHUNK_SECONDS: ${WHISPER_SMALL_CHUNK_SECONDS:-120}
-      WHISPER_MAX_RETRIES: ${WHISPER_MAX_RETRIES:-2}
-      WHISPER_TEMPERATURE: ${WHISPER_TEMPERATURE:-0}
-      WHISPER_RETRY_TEMPERATURE: ${WHISPER_RETRY_TEMPERATURE:-0.2}
-      WHISPER_REPEAT_LIMIT: ${WHISPER_REPEAT_LIMIT:-3}
-      WHISPER_COMPRESSION_RATIO: ${WHISPER_COMPRESSION_RATIO:-2.4}
-      WHISPER_SILENCE_THRESHOLD_DB: ${WHISPER_SILENCE_THRESHOLD_DB:--35}
-      WHISPER_SILENCE_TRIM_SECONDS: ${WHISPER_SILENCE_TRIM_SECONDS:-2}
-      # LLM refinement: LMStudio runs on the host, so the container reaches it
-      # through host.docker.internal (set LMSTUDIO_URL in .env to override).
-      LMSTUDIO_URL: ${LMSTUDIO_URL:-http://host.docker.internal:1234/v1}
-      LMSTUDIO_MODEL: ${LMSTUDIO_MODEL:-local-model}
-      LMSTUDIO_API_KEY: ${LMSTUDIO_API_KEY:-}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - ${AUDIO_NOTES_FOLDER:-./audio}:/data/input
-      - ${AUDIO_NOTES_OUTPUT_FOLDER:-./transcripts}:/data/output
-      # Live-mounted source so code changes apply without rebuilding the image.
-      - ./src:/app/src
-      - ./public:/app/public
-      - ./tsconfig.json:/app/tsconfig.json:ro
-      # package.json is mounted too, so script changes (e.g. the server entry path)
-      # apply without rebuilding; deps are still installed in the image.
-      - ./package.json:/app/package.json:ro
+  # notes-organizer:
+  #   build: .
+  #   container_name: take-notes-organizer
+  #   ports:
+  #     - "127.0.0.1:8080:8080"
+  #   # Run as the host user so files written into the bind-mounted output folder
+  #   # stay owned by you. Running as root (the default) creates root-owned
+  #   # transcripts/notes files that then fail with EACCES on host runs
+  #   # (`npm run serve`). Override HOST_UID/HOST_GID in .env if yours differ.
+  #   user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+  #   # Run the sources through ts-node with nodemon instead of the compiled dist/,
+  #   # so edits to src/ and public/ are picked up automatically (no rebuild).
+  #   command: npm run dev:server
+  #   environment:
+  #     WHISPER_URL: http://whisper:9000
+  #     AUDIO_NOTES_FOLDER: /data/input
+  #     AUDIO_NOTES_OUTPUT_FOLDER: /data/output
+  #     PORT: 8080
+  #     # Writable home for npm/nodemon now that the container runs as a non-root user.
+  #     HOME: /tmp
+  #     # Pipeline options (see README; defaults match the .env.example values)
+  #     WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-pt}
+  #     WHISPER_CHUNK_SECONDS: ${WHISPER_CHUNK_SECONDS:-300}
+  #     WHISPER_CHUNK_OVERLAP_SECONDS: ${WHISPER_CHUNK_OVERLAP_SECONDS:-1}
+  #     WHISPER_SMALL_CHUNK_SECONDS: ${WHISPER_SMALL_CHUNK_SECONDS:-120}
+  #     WHISPER_MAX_RETRIES: ${WHISPER_MAX_RETRIES:-2}
+  #     WHISPER_TEMPERATURE: ${WHISPER_TEMPERATURE:-0}
+  #     WHISPER_RETRY_TEMPERATURE: ${WHISPER_RETRY_TEMPERATURE:-0.2}
+  #     WHISPER_REPEAT_LIMIT: ${WHISPER_REPEAT_LIMIT:-3}
+  #     WHISPER_COMPRESSION_RATIO: ${WHISPER_COMPRESSION_RATIO:-2.4}
+  #     WHISPER_SILENCE_THRESHOLD_DB: ${WHISPER_SILENCE_THRESHOLD_DB:--35}
+  #     WHISPER_SILENCE_TRIM_SECONDS: ${WHISPER_SILENCE_TRIM_SECONDS:-2}
+  #     # LLM refinement: LMStudio runs on the host, so the container reaches it
+  #     # through host.docker.internal. This is deliberately a separate variable
+  #     # from LMSTUDIO_URL (which host runs, `npm run serve`, read from .env as
+  #     # http://127.0.0.1:1234/v1): inside a container "localhost" is the
+  #     # container itself, so it can never reach the host. Override with
+  #     # LMSTUDIO_URL_DOCKER in .env when LMStudio lives elsewhere.
+  #     LMSTUDIO_URL: ${LMSTUDIO_URL_DOCKER:-http://host.docker.internal:1234/v1}
+  #     LMSTUDIO_MODEL: ${LMSTUDIO_MODEL:-local-model}
+  #     LMSTUDIO_API_KEY: ${LMSTUDIO_API_KEY:-}
+  #   extra_hosts:
+  #     - "host.docker.internal:host-gateway"
+  #   volumes:
+  #     - ${AUDIO_NOTES_FOLDER:-./audio}:/data/input
+  #     - ${AUDIO_NOTES_OUTPUT_FOLDER:-./transcripts}:/data/output
+  #     # Live-mounted source so code changes apply without rebuilding the image.
+  #     - ./src:/app/src
+  #     - ./public:/app/public
+  #     - ./tsconfig.json:/app/tsconfig.json:ro
+  #     # package.json is mounted too, so script changes (e.g. the server entry path)
+  #     # apply without rebuilding; deps are still installed in the image.
+  #     - ./package.json:/app/package.json:ro
 
 volumes:
   whisper-data:

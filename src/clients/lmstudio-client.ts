@@ -8,19 +8,43 @@ import { buildRefineUserPrompt, REFINE_SYSTEM_PROMPT } from '../prompts/refine-p
 const REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
 
 /**
- * Extracts the JSON object from a model answer. Tolerates a ```json fence or
- * surrounding prose by taking the outermost braces.
+ * Penalty applied only on the retry after a degenerate (repetition-loop) or
+ * truncated answer. The first attempt runs without it to keep the text faithful.
+ */
+const REPETITION_PENALTY = 0.4;
+
+/**
+ * Extracts the first complete JSON object from a model answer. Tolerates a
+ * ```json fence, leading prose and trailing junk: it finds the opening brace and
+ * scans to its matching close, ignoring braces that appear inside strings.
  */
 function extractJsonObject(content: string): unknown {
   let text = content.trim();
   const fence = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
   if (fence) text = fence[1].trim();
-  if (!text.startsWith('{')) {
-    const start = text.indexOf('{');
-    const end = text.lastIndexOf('}');
-    if (start !== -1 && end > start) text = text.slice(start, end + 1);
+
+  const start = text.indexOf('{');
+  if (start === -1) throw new Error('No JSON object found in the model answer');
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return JSON.parse(text.slice(start, i + 1));
+    }
   }
-  return JSON.parse(text);
+  throw new Error('Unterminated JSON object in the model answer');
 }
 
 function normalizeTags(value: unknown): string[] {
@@ -44,18 +68,42 @@ function parseRefineResult(content: string): RefineResult {
   return { title, tags, resume, refinedText };
 }
 
+/** The strict JSON schema the model must answer with. */
+const REFINE_RESPONSE_FORMAT = {
+  type: 'json_schema',
+  json_schema: {
+    name: 'refinement',
+    strict: true,
+    schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        tags: { type: 'array', items: { type: 'string' } },
+        resume: { type: 'string' },
+        refinedText: { type: 'string' },
+      },
+      required: ['title', 'tags', 'resume', 'refinedText'],
+      additionalProperties: false,
+    },
+  },
+} as const;
+
+interface CompletionResult {
+  content: string;
+  finishReason: string | undefined;
+}
+
 /**
- * Refines one transcription through LMStudio's OpenAI-compatible chat API and
- * returns the parsed refinement. Throws on transport or JSON errors so the
- * caller can leave the entry un-refined and retry it on the next run.
+ * One chat-completion call to LMStudio. `frequencyPenalty` is only non-zero on
+ * the retry, to break a repetition loop that would otherwise truncate the answer.
  */
-export async function refineText(
+async function requestRefinement(
   config: Config,
   logger: Logger,
   text: string,
+  frequencyPenalty: number,
   signal?: AbortSignal,
-): Promise<RefineResult> {
-  throwIfAborted(signal);
+): Promise<CompletionResult> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (config.lmstudioApiKey) headers.Authorization = `Bearer ${config.lmstudioApiKey}`;
 
@@ -67,7 +115,8 @@ export async function refineText(
     body: JSON.stringify({
       model: config.lmstudioModel,
       temperature: 0,
-      response_format: { type: 'json_object' },
+      frequency_penalty: frequencyPenalty,
+      response_format: REFINE_RESPONSE_FORMAT,
       messages: [
         { role: 'system', content: REFINE_SYSTEM_PROMPT },
         { role: 'user', content: buildRefineUserPrompt(text) },
@@ -79,13 +128,60 @@ export async function refineText(
     throw new Error(`LMStudio refinement failed (${res.status}): ${(await res.text()).slice(0, 500)}`);
   }
 
-  const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  const content = data.choices?.[0]?.message?.content;
+  const data = (await res.json()) as {
+    choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
+  };
+  const choice = data.choices?.[0];
+  const content = choice?.message?.content;
   if (!content) {
     throw new Error('LMStudio returned an empty refinement');
   }
-  logger.info(`LMStudio answered (${content.length} chars).`);
-  return parseRefineResult(content);
+  logger.info(`LMStudio answered (${content.length} chars, finish_reason=${choice?.finish_reason ?? 'unknown'}).`);
+  return { content, finishReason: choice?.finish_reason };
+}
+
+/**
+ * Refines one transcription through LMStudio's OpenAI-compatible chat API and
+ * returns the parsed refinement. Throws on transport or JSON errors so the
+ * caller can leave the entry un-refined and retry it on the next run.
+ *
+ * The first attempt is faithful (no repetition penalty). If the answer is
+ * truncated mid-JSON or unparsable — usually a local model looping and hitting
+ * its context limit — it retries once with a repetition penalty.
+ */
+export async function refineText(
+  config: Config,
+  logger: Logger,
+  text: string,
+  signal?: AbortSignal,
+): Promise<RefineResult> {
+  throwIfAborted(signal);
+
+  const first = await requestRefinement(config, logger, text, 0, signal);
+  try {
+    return parseRefineResult(first.content);
+  } catch (error) {
+    if (first.finishReason === 'length') {
+      logger.warn('LMStudio hit its context limit and the answer was cut off; retrying with a repetition penalty.');
+    } else {
+      const reason = error instanceof Error ? error.message : String(error);
+      logger.warn(`Could not parse the refinement (${reason}); retrying with a repetition penalty.`);
+    }
+  }
+
+  const retry = await requestRefinement(config, logger, text, REPETITION_PENALTY, signal);
+  try {
+    return parseRefineResult(retry.content);
+  } catch (error) {
+    if (retry.finishReason === 'length') {
+      throw new Error(
+        "LMStudio's answer was cut off (finish_reason=length): the model's context length is too small for " +
+          'this note. Increase the context length when loading the model in LMStudio (My Models → the model → ' +
+          'Context Length), then retry.',
+      );
+    }
+    throw error;
+  }
 }
 
 /** Digs the socket error code (e.g. ECONNREFUSED, ENOTFOUND) out of a failed fetch. */

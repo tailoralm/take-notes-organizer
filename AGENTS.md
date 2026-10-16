@@ -139,6 +139,23 @@ Refine run (`src/services/refine-service.ts` `refineAll()`) — refines transcri
 - Response JSON: `{ "text": "..." }` is written verbatim as the `.txt` file.
 - Supported audio includes `.ogg` (telegram voice notes); the server handles conversion via ffmpeg.
 
+## LMStudio integration
+
+- Endpoint: `POST {LMSTUDIO_URL}/chat/completions`, a JSON body with
+  `model`, `temperature: 0`, `response_format: { type: "json_schema" }` (a strict schema for
+  `{title, tags, resume, refinedText}`) and `frequency_penalty` (0 on the first try, `0.4` on the
+  retry). `json_object` is NOT accepted by current LMStudio builds.
+- Health check: `GET {LMSTUDIO_URL}/models`, polled every 10 s for up to 5 minutes.
+- The answer is parsed by `extractJsonObject`, which brace-matches (string-aware) to tolerate
+  fences, leading prose and trailing junk; `parseRefineResult` validates the fields.
+- If the first attempt is unparsable or truncated (`finish_reason === "length"`), the client
+  retries once with a repetition penalty; a local model that loops, fills its context and gets
+  cut off mid-JSON is recovered this way. If the retry also hits `length`, a clear error tells the
+  user to raise the model's context length in LMStudio.
+- Docker reaches host LMStudio through `LMSTUDIO_URL_DOCKER` (`host.docker.internal:1234/v1`);
+  host runs use `LMSTUDIO_URL` (`127.0.0.1:1234/v1`). LMStudio must have "Serve on Local Network"
+  enabled so it binds `0.0.0.0` instead of `127.0.0.1`.
+
 ## Docker / docker compose
 
 - `compose.yml` starts two services:
@@ -154,6 +171,9 @@ Refine run (`src/services/refine-service.ts` `refineAll()`) — refines transcri
   so edits apply without rebuilding the image (nodemon hot-reloads on `src` changes; `public/` is
   re-read per request; mounting `package.json` keeps the `npm run dev:server` entry path in sync).
   The image is still built once for the Node deps and `ffmpeg`.
+- The container runs as the host user (`user: "${HOST_UID:-1000}:${HOST_GID:-1000}"`, `HOME=/tmp`)
+  so it writes output files owned by you; running as root would create root-owned files in the
+  bind mount that later fail with `EACCES` on host runs.
 - A one-shot CLI run is available with `docker compose run --rm notes-organizer npm start`
   (ts-node over the mounted `src`; do not use the stale `dist/`).
 

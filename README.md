@@ -70,6 +70,10 @@ The `notes-organizer` container runs the web UI server from the mounted sources
 edits are picked up automatically (nodemon restarts on `src` changes, `public/` is re-read
 per request) and you only need to build the image once for the dependencies.
 
+The container runs as your host user (`HOST_UID`/`HOST_GID`, default `1000:1000`) so files
+written into `transcripts/` stay owned by you. Running the container as root would create
+root-owned files that later fail with `EACCES` when you run the app on the host.
+
 A one-shot CLI run is still available (also over the mounted sources):
 
 ```bash
@@ -96,9 +100,22 @@ docker compose run --rm notes-organizer npm start
 | `WHISPER_COMPRESSION_RATIO` | `2.4` | Chunk text gzip ratio above this flags a chunk. |
 | `WHISPER_SILENCE_THRESHOLD_DB` | `-35` | Sound level (dB) under which a region counts as silence. |
 | `WHISPER_SILENCE_TRIM_SECONDS` | `2` | Internal silences longer than this are trimmed during preprocessing. |
-| `LMSTUDIO_URL` | `http://127.0.0.1:1234/v1` | Base URL of the LMStudio OpenAI-compatible server (in Docker: `host.docker.internal:1234/v1`). |
+| `LMSTUDIO_URL` | `http://127.0.0.1:1234/v1` | Base URL of the LMStudio OpenAI-compatible server, used by **host** runs (`npm run serve`). |
+| `LMSTUDIO_URL_DOCKER` | `http://host.docker.internal:1234/v1` | Base URL the Docker Compose container uses; ignored by host runs. |
 | `LMSTUDIO_MODEL` | `local-model` | Id of the model loaded in LMStudio. |
 | `LMSTUDIO_API_KEY` | *(empty)* | Optional Bearer token for the LMStudio server. |
+
+The refine run calls LMStudio's OpenAI-compatible chat API with
+`response_format: { type: "json_schema" }` and a strict schema for
+`{title, tags, resume, refinedText}`.
+
+Inside Docker, `LMSTUDIO_URL` from `.env` is **not** used: a container's `localhost` is the
+container itself, so the `notes-organizer` service reads `LMSTUDIO_URL_DOCKER` instead, which
+defaults to `http://host.docker.internal:1234/v1` (mapped to the host gateway in `compose.yml`).
+LMStudio's server binds `127.0.0.1` by default, which the container cannot reach, so enable
+**"Serve on Local Network"** in LMStudio's Developer/Server tab (it then binds `0.0.0.0`).
+If you still see `ECONNREFUSED` on `host.docker.internal:1234`, that toggle is off or a host
+firewall is blocking Docker.
 
 The `WHISPER_*` and `LMSTUDIO_*` variables are also declared in `docker-compose.yml` for the
 `notes-organizer` service; the values there use `${VAR:-default}` interpolation so
